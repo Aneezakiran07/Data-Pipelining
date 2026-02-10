@@ -7,6 +7,7 @@ from sklearn.experimental import enable_iterative_imputer
 from sklearn.impute import KNNImputer, IterativeImputer
 from typing import Optional
 import io
+import openpyxl  # For Excel support
 
 #setting up the page configuration
 st.set_page_config(
@@ -350,16 +351,27 @@ st.divider()
 
 st.subheader("📁 Upload your data file")
 uploaded_file = st.file_uploader(
-    "Choose a CSV file",
-    type=['csv'],
-    help="Upload a CSV file that needs cleaning"
+    "Choose a CSV or Excel file",
+    type=['csv', 'xlsx', 'xls'],
+    help="Upload a CSV or Excel file that needs cleaning"
 )
 
 if uploaded_file is not None:
     st.success("✅ File uploaded successfully!")
 
     try:
-        df = pd.read_csv(uploaded_file)
+        # Read file based on extension
+        file_extension = uploaded_file.name.split('.')[-1].lower()
+        
+        if file_extension == 'csv':
+            # Read CSV with proper quote handling
+            df = pd.read_csv(uploaded_file, quotechar='"', skipinitialspace=True)
+        elif file_extension in ['xlsx', 'xls']:
+            # Read Excel file
+            df = pd.read_excel(uploaded_file)
+        else:
+            st.error("Unsupported file format. Please upload CSV or Excel file.")
+            st.stop()
 
         # Initialize session state
         if 'original_df' not in st.session_state:
