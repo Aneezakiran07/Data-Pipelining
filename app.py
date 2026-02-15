@@ -1360,3 +1360,5 @@ else:
         st.caption("The pipeline can handle currency symbols, percentages, units, and missing values automatically!")
 
    
+
+

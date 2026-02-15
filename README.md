@@ -10,6 +10,8 @@ Upload a CSV or Excel file and the app will scan it, tell you what is wrong, and
 
 ---
 
+## Demo Link: https://data-pipelining-qnddvbut7ayklccgo5cp8v.streamlit.app/
+
 ## Features
 
 ### Smart Recommendations
@@ -93,3 +95,4 @@ Everything runs locally. No data is sent anywhere. Your files stay on your machi
 ## Test Data
 
 A sample CSV is included that covers every error type the app can handle — mixed date formats, invalid emails, messy phone numbers, currency strings, percentages, unit values, duration strings, outliers, missing values, and duplicate rows.
+
