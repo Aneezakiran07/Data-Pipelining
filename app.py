@@ -50,8 +50,11 @@ def drop_duplicate_rows(df:pd.DataFrame):
     return df.drop_duplicates()
 
 def drop_duplicate_columns(df:pd.DataFrame):
-    checking_valid_input(df)  
-    return df.drop_duplicates().T.drop_duplicates().T
+    checking_valid_input(df)
+    # First drop columns with duplicate names (keep first occurrence)
+    df = df.loc[:, ~df.columns.duplicated()]
+    # Then drop columns with identical content
+    return df.T.drop_duplicates().T
 
 def stripping_whitespace(df:pd.DataFrame):
     checking_valid_input(df)
@@ -483,8 +486,10 @@ def analyze_data_issues(df: pd.DataFrame, conversion_threshold: float = 0.6) -> 
     # Check duplicates
     issues['duplicate_rows'] = df.duplicated().sum()
     
-    # Check duplicate columns
-    issues['duplicate_cols'] = len(df.columns) - len(df.T.drop_duplicates().T.columns)
+    # Check duplicate columns — by name AND by content
+    dup_names = df.columns[df.columns.duplicated()].tolist()
+    dup_content = len(df.columns) - len(df.T.drop_duplicates().T.columns)
+    issues['duplicate_cols'] = max(len(dup_names), dup_content)
     
     # Check whitespace
     for col in df.select_dtypes(include='object').columns:
@@ -650,7 +655,7 @@ def get_dataframe_stats(df):
 
 st.markdown('<p class="main-header">Advanced Data Cleaning Pipeline</p>', unsafe_allow_html=True)
 st.markdown("Upload a CSV or Excel file and get smart recommendations on how to clean your data.")
-st.markdown("**Don't have a file? Download the test_data CSV from [this GitHub repo](https://github.com/Aneezakiran07/Data-Pipelining) and upload it here to check all functionalities.**")
+st.markdown("**Don't have a file? Download the test CSV from [this GitHub repo](https://github.com/Aneezakiran07/Data-Pipelining) and upload it here to check all functionalities.**")
 
 # Sidebar for settings
 with st.sidebar:
@@ -700,22 +705,42 @@ if uploaded_file is not None:
     st.success("File uploaded successfully!")
 
     try:
-        # Read file based on extension
         file_extension = uploaded_file.name.split('.')[-1].lower()
-        
+
         if file_extension == 'csv':
             df = pd.read_csv(uploaded_file, quotechar='"', skipinitialspace=True)
+
         elif file_extension in ['xlsx', 'xls']:
-            df = pd.read_excel(uploaded_file)
+            # Check how many sheets the file has
+            xl = pd.ExcelFile(uploaded_file)
+            sheet_names = xl.sheet_names
+
+            if len(sheet_names) > 1:
+                selected_sheet = st.selectbox(
+                    f"This file has {len(sheet_names)} sheets. Select one to load:",
+                    sheet_names,
+                    key="sheet_selector"
+                )
+            else:
+                selected_sheet = sheet_names[0]
+
+            df = pd.read_excel(uploaded_file, sheet_name=selected_sheet)
+            if len(sheet_names) > 1:
+                st.info(f"Loaded sheet: {selected_sheet}")
         else:
             st.error("Unsupported file format. Please upload CSV or Excel file.")
             st.stop()
 
-        # Initialize session state
-        if 'original_df' not in st.session_state:
+        # Reload if a new file is uploaded (compare filename + size)
+        file_id = f"{uploaded_file.name}_{uploaded_file.size}"
+        if st.session_state.get('loaded_file_id') != file_id:
             st.session_state.original_df = df.copy()
             st.session_state.current_df = df.copy()
             st.session_state.original_stats = get_dataframe_stats(df)
+            st.session_state.loaded_file_id = file_id
+            st.session_state.selected_columns = {}
+            st.session_state.val_selected = {}
+            st.session_state.last_success_msg = None
         
         # Get current statistics
         current_stats = get_dataframe_stats(st.session_state.current_df)
