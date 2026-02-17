@@ -650,6 +650,7 @@ def get_dataframe_stats(df):
 
 st.markdown('<p class="main-header">Advanced Data Cleaning Pipeline</p>', unsafe_allow_html=True)
 st.markdown("Upload a CSV or Excel file and get smart recommendations on how to clean your data.")
+st.markdown("**Don't have a file? Download the test_data CSV from [this GitHub repo](https://github.com/Aneezakiran07/Data-Pipelining) and upload it here to check all functionalities.**")
 
 # Sidebar for settings
 with st.sidebar:
@@ -1353,12 +1354,6 @@ else:
             'percentage': ['75%', '80.5%', '99%', '75%'],
             'weight': ['100kg', '150.5 lbs', '?', '100kg'],
             'duration': ['1h30m', '90min', 'NA', '1h30m']
- 
- 
         })
         st.dataframe(sample_df, use_container_width=True)
         st.caption("The pipeline can handle currency symbols, percentages, units, and missing values automatically!")
-
-   
-
-
