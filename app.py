@@ -34,29 +34,24 @@ st.markdown("""
     }
     </style>
 """, unsafe_allow_html=True)
+#data cleaning functions
 
-# ============================================================================
-# DATA CLEANING FUNCTIONS (FROM PHASE 4)
-# ============================================================================
-
-def checking_valid_input(df:pd.DataFrame):
-    if not isinstance(df,pd.DataFrame):
+def checking_valid_input(df: pd.DataFrame):
+    if not isinstance(df, pd.DataFrame):
         raise TypeError("Input must be a pandas DataFrame")
     if df.empty:
         raise ValueError("DataFrame is empty")
 
-def drop_duplicate_rows(df:pd.DataFrame):
-    checking_valid_input(df)  
+def drop_duplicate_rows(df: pd.DataFrame):
+    checking_valid_input(df)
     return df.drop_duplicates()
 
-def drop_duplicate_columns(df:pd.DataFrame):
+def drop_duplicate_columns(df: pd.DataFrame):
     checking_valid_input(df)
-    # First drop columns with duplicate names (keep first occurrence)
     df = df.loc[:, ~df.columns.duplicated()]
-    # Then drop columns with identical content
     return df.T.drop_duplicates().T
 
-def stripping_whitespace(df:pd.DataFrame):
+def stripping_whitespace(df: pd.DataFrame):
     checking_valid_input(df)
     return df.apply(lambda x: x.str.strip() if x.dtype == "object" else x)
 
@@ -66,43 +61,40 @@ def clean_string_edges(
     inplace: bool = False,
     verbose: bool = False
 ) -> Optional[pd.DataFrame]:
-    """Intelligently trims edge characters when conditions are met."""
     if not isinstance(df, pd.DataFrame):
         raise TypeError("Input must be a pandas DataFrame")
     if df.empty:
         if verbose:
             st.warning("Warning: Empty DataFrame received")
         return None if inplace else df.copy()
-    
+
     try:
         df_clean = df if inplace else df.copy()
         cleaned_cols = []
-        
+
         for col in df_clean.select_dtypes(include=['object']).columns:
             col_series = df_clean[col].astype(str)
-            
+
             leading_chars = col_series.str.extract(r'^([^\w\s])')[0].dropna()
             trailing_chars = col_series.str.extract(r'([^\w\s])$')[0].dropna()
-            
-            keep_leading = (leading_chars.value_counts(normalize=True).iloc[0] > threshold 
+
+            keep_leading = (leading_chars.value_counts(normalize=True).iloc[0] > threshold
                            if len(leading_chars) > 0 else False)
-            keep_trailing = (trailing_chars.value_counts(normalize=True).iloc[0] > threshold 
+            keep_trailing = (trailing_chars.value_counts(normalize=True).iloc[0] > threshold
                              if len(trailing_chars) > 0 else False)
-            
+
             if not keep_leading:
-                if keep_leading is False:
-                    df_clean[col] = col_series.str.replace(r'^\W+', '', regex=True)
-                    cleaned_cols.append(col)
-            
+                df_clean[col] = col_series.str.replace(r'^\W+', '', regex=True)
+                cleaned_cols.append(col)
+
             if not keep_trailing:
-                if keep_trailing is False:
-                    df_clean[col] = col_series.str.replace(r'\W+$', '', regex=True)
-                    if col not in cleaned_cols:
-                        cleaned_cols.append(col)
-        
+                df_clean[col] = col_series.str.replace(r'\W+$', '', regex=True)
+                if col not in cleaned_cols:
+                    cleaned_cols.append(col)
+
         if verbose and cleaned_cols:
             st.success(f"Cleaned string edges in {len(cleaned_cols)} columns")
-        
+
         return None if inplace else df_clean
     except Exception as e:
         if verbose:
@@ -115,7 +107,6 @@ def smart_column_cleaner(
     inplace: bool = False,
     verbose: bool = False
 ) -> Optional[pd.DataFrame]:
-    """Ultimate smart column cleaner for numeric formats."""
     if not isinstance(df, pd.DataFrame):
         raise TypeError("Input must be a pandas DataFrame")
     if df.empty:
@@ -126,7 +117,6 @@ def smart_column_cleaner(
     try:
         df_clean = df if inplace else df.copy()
 
-        # Define currency pattern
         currency_symbols = r'[$€£¥₹₽₺₩฿₡₦₲₴₵₸₳₻₼₽₾₿]'
         currency_codes = r'(USD|EUR|GBP|JPY|CNY|INR|RUB|AUD|CAD|PKR|BDT|LKR|NPR|SGD|HKD|AED|CHF)'
         currency_text = r'(dollars?|euros?|pounds?|rupees?|yuan|yen|rubles?|pesos?|riyal|ringgit|baht|dinar|lei|krona|forint|złoty)'
@@ -141,7 +131,6 @@ def smart_column_cleaner(
             if non_empty.empty:
                 continue
 
-            # Currency Detection
             currency_like = non_empty.str.contains(r'\d', regex=True) & non_empty.str.contains(currency_pattern, case=False, regex=True)
             if currency_like.mean() > conversion_threshold:
                 cleaned = (
@@ -151,14 +140,12 @@ def smart_column_cleaner(
                     .str.extract(r'([-]?\d[\d\.,]*)', expand=False)
                     .str.replace(',', '', regex=False)
                 )
-
                 converted = pd.to_numeric(cleaned, errors='coerce')
                 if converted.notna().mean() > conversion_threshold:
                     df_clean[col] = converted
                     conversions.append(f" {col} (currency)")
                     continue
 
-            # Percentage Detection
             if non_empty.str.contains('%').mean() > conversion_threshold:
                 cleaned = non_empty.str.replace('%', '', regex=False)
                 cleaned = cleaned.str.replace(r'[^\d.\-]', '', regex=True)
@@ -168,7 +155,6 @@ def smart_column_cleaner(
                     conversions.append(f" {col} (percentage)")
                     continue
 
-            # Unit Detection
             unit_pattern = r'\d+\s?(kg|g|mg|cm|mm|m|km|ml|l|lb|oz|gal|pt|°C|°F|kWh|cal|ha|ac|sqft|m²|km²)'
             if non_empty.str.contains(unit_pattern, case=False, regex=True).mean() > conversion_threshold:
                 cleaned = non_empty.str.extract(r'([-]?\d+\.?\d*)', expand=False)
@@ -178,7 +164,6 @@ def smart_column_cleaner(
                     conversions.append(f" {col} (unit)")
                     continue
 
-            # Duration Detection
             duration_pattern = r'(h|hr|hour|min|minute|sec|second|s|m)'
             if non_empty.str.contains(duration_pattern, case=False, regex=True).mean() > conversion_threshold:
                 def convert_duration(val):
@@ -201,7 +186,6 @@ def smart_column_cleaner(
                     conversions.append(f" {col} (duration)")
                     continue
 
-            # Generic Numeric Detection
             cleaned = non_empty.str.replace(r'[^\d.\-]', '', regex=True)
             converted = pd.to_numeric(cleaned, errors='coerce')
             if converted.notna().mean() > conversion_threshold:
@@ -212,7 +196,7 @@ def smart_column_cleaner(
             st.success(f"Converted {len(conversions)} columns:")
             for conv in conversions:
                 st.write(f" • {conv}")
-        
+
         return None if inplace else df_clean
 
     except Exception as e:
@@ -227,59 +211,47 @@ def missing_value_handler(
     numeric_strategy: str = 'auto',
     verbose: bool = False
 ) -> Optional[pd.DataFrame]:
-    """Enhanced missing value handler with KNN/MICE imputation."""
     if not isinstance(df, pd.DataFrame):
         raise TypeError("Input must be a pandas DataFrame")
     if not 0 <= threshold <= 1:
         raise ValueError("Threshold must be between 0 and 1")
-    
+
     if df.empty:
         if verbose:
             st.warning("Warning: Empty DataFrame received")
         return None if inplace else df.copy()
-    
+
     try:
         if not inplace:
             df_clean = df.copy()
         else:
             df_clean = df
-        
-        # Auto-switch to MICE if dataset is too large
+
         if numeric_strategy == 'auto':
             if df_clean.shape[1] > 50 or len(df_clean) > 5000:
                 numeric_strategy = 'mice'
-                if verbose:
-                    st.info("Auto-switched to MICE (dataset exceeds 50 columns or 5,000 rows)")
-        
-        # Convert common missing indicators to NaN
+
         missing_indicators = ['?', 'NA', 'unknown', 'n/a', 'NaN', 'null', -999, 999, 9999, '']
         df_clean.replace(missing_indicators, np.nan, inplace=True)
-        
-        # Drop columns with too many missing values
+
         missing_percent = df_clean.isna().mean()
         cols_to_drop = missing_percent[missing_percent > threshold].index
         if len(cols_to_drop) > 0:
             df_clean.drop(columns=cols_to_drop, inplace=True)
             if verbose:
                 st.warning(f"Dropped {len(cols_to_drop)} columns with >{threshold*100}% missing values")
-        
+
         numeric_cols = df_clean.select_dtypes(include=np.number).columns
         cat_cols = df_clean.select_dtypes(exclude=np.number).columns
-        
-        # Numeric imputation
+
         if not numeric_cols.empty and df_clean[numeric_cols].isna().any().any():
             if numeric_strategy == 'knn' or (numeric_strategy == 'auto' and len(df_clean) <= 5000 and df_clean.shape[1] <= 50):
-                if verbose:
-                    st.info("Using KNN imputer for numeric columns")
                 imputer = KNNImputer(n_neighbors=min(5, max(3, len(df_clean)//1000)))
             else:
-                if verbose:
-                    st.info("Using MICE imputer for numeric columns")
                 imputer = IterativeImputer(max_iter=10, random_state=42)
-            
+
             df_clean[numeric_cols] = imputer.fit_transform(df_clean[numeric_cols])
-        
-        # Categorical imputation
+
         for col in cat_cols:
             if df_clean[col].isna().any():
                 if df_clean[col].nunique() < 0.5 * len(df_clean):
@@ -287,189 +259,142 @@ def missing_value_handler(
                     df_clean[col] = df_clean[col].fillna(mode_val)
                 else:
                     df_clean[col] = df_clean[col].fillna('Missing')
-        
-        if verbose:
-            st.success(f"Imputed {len(numeric_cols)} numeric and {len(cat_cols)} categorical columns")
-        
+
         return None if inplace else df_clean
-    
+
     except Exception as e:
         if verbose:
             st.error(f"Error during missing value handling: {str(e)}")
         raise
 
-# ============================================================================
-# PHASE 6: VALIDATION & QUALITY FUNCTIONS
-# ============================================================================
+# VALIDATION & QUALITY FUNCTIONS
 
-def validate_email_col(
-    df: pd.DataFrame,
-    col: str,
-    action: str = 'flag'   # 'flag' adds a boolean column, 'remove' drops invalid rows
-) -> pd.DataFrame:
-    """Validates email format in a column. Flags or removes invalid entries."""
+
+def validate_email_col(df, col, action='flag'):
     checking_valid_input(df)
     if col not in df.columns:
         raise ValueError(f"Column '{col}' not found")
-
     df_clean = df.copy()
     pattern = r'^[\w\.\+\-]+@[\w\-]+\.[a-zA-Z]{2,}$'
     is_valid = df_clean[col].astype(str).str.strip().str.match(pattern)
-
     if action == 'flag':
         df_clean[f'{col}_valid_email'] = is_valid
     elif action == 'remove':
         df_clean = df_clean[is_valid]
-
     return df_clean
 
-
-def validate_phone_col(
-    df: pd.DataFrame,
-    col: str,
-    output_format: str = '+1XXXXXXXXXX'  # target format hint shown in UI
-) -> pd.DataFrame:
-    """Strips all non-digit characters and standardizes phone numbers."""
+def validate_phone_col(df, col, output_format='+1XXXXXXXXXX'):
     checking_valid_input(df)
     if col not in df.columns:
         raise ValueError(f"Column '{col}' not found")
-
     df_clean = df.copy()
-
     def standardize_phone(val):
         digits = re.sub(r'\D', '', str(val))
         if len(digits) == 10:
-            return f'+1{digits}'           # assume US if 10 digits
+            return f'+1{digits}'
         elif len(digits) == 11 and digits.startswith('1'):
             return f'+{digits}'
         elif len(digits) >= 7:
             return f'+{digits}'
-        return np.nan                       # too short to be a real number
-
+        return np.nan
     df_clean[col] = df_clean[col].apply(standardize_phone)
     return df_clean
 
-
-def validate_date_col(
-    df: pd.DataFrame,
-    col: str,
-    output_format: str = '%Y-%m-%d'
-) -> pd.DataFrame:
-    """Detects and parses mixed date formats into one consistent format."""
+def validate_date_col(df, col, output_format='%Y-%m-%d'):
     checking_valid_input(df)
     if col not in df.columns:
         raise ValueError(f"Column '{col}' not found")
-
     df_clean = df.copy()
-
-    # Try every common format explicitly — most reliable approach
     formats_to_try = [
-        '%Y-%m-%d',       # 2023-01-15
-        '%d/%m/%Y',       # 15/03/2022
-        '%m/%d/%Y',       # 03/15/2022
-        '%Y/%m/%d',       # 2022/08/30
-        '%d-%m-%Y',       # 28-07-2020
-        '%m-%d-%Y',       # 03-15-2022
-        '%d %b %Y',       # 15 Jan 2023
-        '%d %B %Y',       # 15 January 2023
-        '%b %d %Y',       # Jan 15 2023
-        '%B %d %Y',       # January 15 2023
-        '%b %d, %Y',      # Jan 15, 2023
-        '%B %d, %Y',      # January 15, 2023
-        '%d/%m/%y',       # 15/03/22
-        '%m/%d/%y',       # 03/15/22
-        '%d-%m-%y',       # 15-03-22
-        '%Y.%m.%d',       # 2023.01.15
-        '%d.%m.%Y',       # 15.01.2023
+        '%Y-%m-%d', '%d/%m/%Y', '%m/%d/%Y', '%Y/%m/%d',
+        '%d-%m-%Y', '%m-%d-%Y', '%d %b %Y', '%d %B %Y',
+        '%b %d %Y', '%B %d %Y', '%b %d, %Y', '%B %d, %Y',
+        '%d/%m/%y', '%m/%d/%y', '%d-%m-%y', '%Y.%m.%d', '%d.%m.%Y',
     ]
-
     def parse_single(val):
         if pd.isna(val) or str(val).strip() == '':
             return pd.NaT
         val_str = str(val).strip()
-        # Try each explicit format first
         for fmt in formats_to_try:
             try:
                 return pd.to_datetime(val_str, format=fmt)
             except (ValueError, TypeError):
                 continue
-        # Last resort: let pandas guess
         try:
             return pd.to_datetime(val_str)
         except (ValueError, TypeError):
             return pd.NaT
-
     parsed = df_clean[col].apply(parse_single)
     df_clean[col] = parsed.dt.strftime(output_format).where(parsed.notna(), other=np.nan)
     return df_clean
 
-
-def cap_outliers(
-    df: pd.DataFrame,
-    col: str,
-    method: str = 'iqr',    # 'iqr' or 'zscore'
-    action: str = 'cap',    # 'cap' clips to boundary, 'remove' drops the row
-    threshold: float = 1.5  # IQR multiplier or Z-score cutoff
-) -> pd.DataFrame:
-    """Detects outliers via IQR or Z-score and caps or removes them."""
+def cap_outliers(df, col, method='iqr', action='cap', threshold=1.5):
     checking_valid_input(df)
     if col not in df.columns:
         raise ValueError(f"Column '{col}' not found")
     if not pd.api.types.is_numeric_dtype(df[col]):
         raise TypeError(f"Column '{col}' must be numeric")
-
     df_clean = df.copy()
     series = df_clean[col].dropna()
-
     if method == 'iqr':
         q1, q3 = series.quantile(0.25), series.quantile(0.75)
         iqr = q3 - q1
         lower, upper = q1 - threshold * iqr, q3 + threshold * iqr
-    else:  # zscore
+    else:
         mean, std = series.mean(), series.std()
         lower = mean - threshold * std
         upper = mean + threshold * std
-
     if action == 'cap':
         df_clean[col] = df_clean[col].clip(lower=lower, upper=upper)
     elif action == 'remove':
         mask = df_clean[col].isna() | ((df_clean[col] >= lower) & (df_clean[col] <= upper))
         df_clean = df_clean[mask]
-
     return df_clean
 
-
-def validate_range(
-    df: pd.DataFrame,
-    col: str,
-    min_val: float,
-    max_val: float,
-    action: str = 'flag'    # 'flag' adds boolean col, 'remove' drops invalid rows
-) -> pd.DataFrame:
-    """Flags or removes rows where column value is outside [min_val, max_val]."""
+def validate_range(df, col, min_val, max_val, action='flag'):
     checking_valid_input(df)
     if col not in df.columns:
         raise ValueError(f"Column '{col}' not found")
     if not pd.api.types.is_numeric_dtype(df[col]):
         raise TypeError(f"Column '{col}' must be numeric")
-
     df_clean = df.copy()
     in_range = df_clean[col].between(min_val, max_val, inclusive='both') | df_clean[col].isna()
-
     if action == 'flag':
         df_clean[f'{col}_in_range'] = in_range
     elif action == 'remove':
         df_clean = df_clean[in_range]
-
     return df_clean
 
+# CACHED ANALYSIS FUNCTIONS 
+@st.cache_data(show_spinner=False)
+def load_file(file_bytes: bytes, filename: str, sheet_name=None) -> pd.DataFrame:
+    """FIX #4 — cache file parsing so it doesn't re-read on every interaction."""
+    ext = filename.split('.')[-1].lower()
+    buf = io.BytesIO(file_bytes)
+    if ext == 'csv':
+        return pd.read_csv(buf, quotechar='"', skipinitialspace=True)
+    else:
+        return pd.read_excel(buf, sheet_name=sheet_name)
 
-# ============================================================================
-# PHASE 5: SMART RECOMMENDATIONS ENGINE
-# ============================================================================
+@st.cache_data(show_spinner=False)
+def get_dataframe_stats(df: pd.DataFrame) -> Dict:
+    """FIX #2 — cached stats; only recomputes when df actually changes."""
+    return {
+        'rows': df.shape[0],
+        'columns': df.shape[1],
+        'missing_cells': df.isna().sum().sum(),
+        'duplicate_rows': df.duplicated().sum(),
+        'numeric_cols': len(df.select_dtypes(include=np.number).columns),
+        'categorical_cols': len(df.select_dtypes(exclude=np.number).columns),
+        'memory_usage': df.memory_usage(deep=True).sum() / 1024**2
+    }
 
-def analyze_data_issues(df: pd.DataFrame, conversion_threshold: float = 0.6) -> Dict[str, any]:
-    """Analyzes the dataframe and identifies potential issues."""
+@st.cache_data(show_spinner=False)
+def get_analysis_and_recommendations(
+    df: pd.DataFrame, conversion_threshold: float
+) -> Tuple[Dict, List]:
+    """FIX #1 & #3 — single cached call replaces the per-render regex loops."""
+
     issues = {
         'duplicate_rows': 0,
         'duplicate_cols': 0,
@@ -482,214 +407,147 @@ def analyze_data_issues(df: pd.DataFrame, conversion_threshold: float = 0.6) -> 
         'missing_cols': [],
         'edge_char_cols': []
     }
-    
-    # Check duplicates
+
     issues['duplicate_rows'] = df.duplicated().sum()
-    
-    # Check duplicate columns — by name AND by content
+
     dup_names = df.columns[df.columns.duplicated()].tolist()
     dup_content = len(df.columns) - len(df.T.drop_duplicates().T.columns)
     issues['duplicate_cols'] = max(len(dup_names), dup_content)
-    
-    # Check whitespace
+
     for col in df.select_dtypes(include='object').columns:
         if df[col].astype(str).str.strip().ne(df[col].astype(str)).any():
             issues['whitespace_cols'].append(col)
-    
-    # Check for currency, percentage, units, duration
+
     currency_symbols = r'[$€£¥₹₽₺₩฿₡₦₲₴₵₸₳₻₼₽₾₿]'
     currency_codes = r'(USD|EUR|GBP|JPY|CNY|INR|RUB|AUD|CAD|PKR)'
     currency_pattern = f'{currency_symbols}|{currency_codes}'
-    
+
     for col in df.select_dtypes(include='object').columns:
         series = df[col].astype(str).str.strip()
         non_empty = series.replace('', np.nan).dropna()
-        
         if non_empty.empty:
             continue
-        
-        # Currency check
         currency_like = non_empty.str.contains(r'\d', regex=True) & non_empty.str.contains(currency_pattern, case=False, regex=True)
         if currency_like.mean() > conversion_threshold:
             issues['currency_cols'].append(col)
             continue
-        
-        # Percentage check
         if non_empty.str.contains('%').mean() > conversion_threshold:
             issues['percentage_cols'].append(col)
             continue
-        
-        # Unit check
         unit_pattern = r'\d+\s?(kg|g|mg|cm|mm|m|km|ml|l|lb|oz)'
         if non_empty.str.contains(unit_pattern, case=False, regex=True).mean() > conversion_threshold:
             issues['unit_cols'].append(col)
             continue
-        
-        # Duration check
         duration_pattern = r'(h|hr|hour|min|minute|sec|second)'
         if non_empty.str.contains(duration_pattern, case=False, regex=True).mean() > conversion_threshold:
             issues['duration_cols'].append(col)
-    
-    # Check missing values
+
     issues['missing_cells'] = df.isna().sum().sum()
     for col in df.columns:
         missing_pct = df[col].isna().mean()
         if missing_pct > 0:
             issues['missing_cols'].append((col, missing_pct))
-    
-    # Check edge characters
+
     for col in df.select_dtypes(include='object').columns:
         col_series = df[col].astype(str)
         has_edge_chars = col_series.str.match(r'^\W') | col_series.str.match(r'\W$')
         if has_edge_chars.sum() > 0:
             issues['edge_char_cols'].append(col)
-    
-    return issues
 
-def generate_recommendations(issues: Dict[str, any]) -> List[Tuple[str, str, str, str]]:
-    """Generates actionable recommendations based on detected issues.
-    Returns list of (icon, title, description, action_key) tuples."""
+    # Generate recommendations inline (avoids a second cache layer)
     recommendations = []
-    
-    # Duplicate rows
+
     if issues['duplicate_rows'] > 0:
-        recommendations.append((
-            "",
-            f"Found {issues['duplicate_rows']} duplicate rows",
-            f"Removing duplicates will reduce your dataset size and prevent skewed analysis.",
-            "drop_duplicates"
-        ))
-    
-    # Duplicate columns
+        recommendations.append(("", f"Found {issues['duplicate_rows']} duplicate rows",
+            "Removing duplicates will reduce your dataset size and prevent skewed analysis.", "drop_duplicates"))
+
     if issues['duplicate_cols'] > 0:
-        recommendations.append((
-            "",
-            f"Found {issues['duplicate_cols']} duplicate columns",
-            "These columns are wasting memory and processing power.",
-            "drop_dup_cols"
-        ))
-    
-    # Whitespace
+        recommendations.append(("", f"Found {issues['duplicate_cols']} duplicate columns",
+            "These columns are wasting memory and processing power.", "drop_dup_cols"))
+
     if len(issues['whitespace_cols']) > 0:
-        recommendations.append((
-            "",
-            f"{len(issues['whitespace_cols'])} columns have extra whitespace",
+        recommendations.append(("", f"{len(issues['whitespace_cols'])} columns have extra whitespace",
             f"Columns: {', '.join(issues['whitespace_cols'][:3])}{'...' if len(issues['whitespace_cols']) > 3 else ''}",
-            "strip_whitespace"
-        ))
-    
-    # Currency columns
+            "strip_whitespace"))
+
     if len(issues['currency_cols']) > 0:
-        recommendations.append((
-            "",
-            f"{len(issues['currency_cols'])} columns look like currency but aren't numeric",
+        recommendations.append(("", f"{len(issues['currency_cols'])} columns look like currency but aren't numeric",
             f"Columns: {', '.join(issues['currency_cols'][:3])}{'...' if len(issues['currency_cols']) > 3 else ''}. Convert them to do calculations.",
-            "convert_currency"
-        ))
-    
-    # Percentage columns
+            "convert_currency"))
+
     if len(issues['percentage_cols']) > 0:
-        recommendations.append((
-            "",
-            f"{len(issues['percentage_cols'])} columns contain percentages as text",
+        recommendations.append(("", f"{len(issues['percentage_cols'])} columns contain percentages as text",
             f"Columns: {', '.join(issues['percentage_cols'][:3])}{'...' if len(issues['percentage_cols']) > 3 else ''}. Should be decimals for math.",
-            "convert_percentage"
-        ))
-    
-    # Unit columns
+            "convert_percentage"))
+
     if len(issues['unit_cols']) > 0:
-        recommendations.append((
-            "",
-            f"{len(issues['unit_cols'])} columns have measurement units mixed with numbers",
+        recommendations.append(("", f"{len(issues['unit_cols'])} columns have measurement units mixed with numbers",
             f"Columns: {', '.join(issues['unit_cols'][:3])}{'...' if len(issues['unit_cols']) > 3 else ''}",
-            "convert_units"
-        ))
-    
-    # Duration columns
+            "convert_units"))
+
     if len(issues['duration_cols']) > 0:
-        recommendations.append((
-            "",
-            f"{len(issues['duration_cols'])} columns contain time durations",
+        recommendations.append(("", f"{len(issues['duration_cols'])} columns contain time durations",
             f"Columns: {', '.join(issues['duration_cols'][:3])}{'...' if len(issues['duration_cols']) > 3 else ''}. Convert to seconds for consistency.",
-            "convert_duration"
-        ))
-    
-    # Missing values
+            "convert_duration"))
+
     if issues['missing_cells'] > 0:
         top_missing = sorted(issues['missing_cols'], key=lambda x: x[1], reverse=True)[:3]
         col_details = ', '.join([f"{col} ({pct*100:.0f}%)" for col, pct in top_missing])
-        recommendations.append((
-            "",
-            f"{issues['missing_cells']} missing values found",
+        recommendations.append(("", f"{issues['missing_cells']} missing values found",
             f"Worst affected: {col_details}. Use ML imputation to fill them intelligently.",
-            "handle_missing"
-        ))
-    
-    # Edge characters
+            "handle_missing"))
+
     if len(issues['edge_char_cols']) > 0:
-        recommendations.append((
-            "",
-            f"{len(issues['edge_char_cols'])} columns have unwanted edge characters",
+        recommendations.append(("", f"{len(issues['edge_char_cols'])} columns have unwanted edge characters",
             f"Columns: {', '.join(issues['edge_char_cols'][:3])}{'...' if len(issues['edge_char_cols']) > 3 else ''}",
-            "clean_edges"
-        ))
-    
-    return recommendations
+            "clean_edges"))
 
-# Helper function to get statistics
-def get_dataframe_stats(df):
-    """Returns key statistics about the DataFrame."""
-    return {
-        'rows': df.shape[0],
-        'columns': df.shape[1],
-        'missing_cells': df.isna().sum().sum(),
-        'duplicate_rows': df.duplicated().sum(),
-        'numeric_cols': len(df.select_dtypes(include=np.number).columns),
-        'categorical_cols': len(df.select_dtypes(exclude=np.number).columns),
-        'memory_usage': df.memory_usage(deep=True).sum() / 1024**2
-    }
+    return issues, recommendations
 
-# ============================================================================
-# MAIN APP
-# ============================================================================
+##MAIN APP
 
 st.markdown('<p class="main-header">Advanced Data Cleaning Pipeline</p>', unsafe_allow_html=True)
 st.markdown("Upload a CSV or Excel file and get smart recommendations on how to clean your data.")
 st.markdown("**Don't have a file? Download the test CSV from [this GitHub repo](https://github.com/Aneezakiran07/Data-Pipelining) and upload it here to check all functionalities.**")
 
-# Sidebar for settings
+# Sidebar
 with st.sidebar:
     st.header("Settings")
-    
-    st.subheader("Missing Value Handler")
-    missing_threshold = st.slider(
-        "Drop columns with missing % >",
-        0, 100, 30,
-        key="missing_threshold_slider",
-        help="Columns with more than this percentage of missing values will be dropped"
-    ) / 100
-    
-    numeric_strategy = st.selectbox(
-        "Numeric Imputation Strategy",
-        ['auto', 'knn', 'mice'],
-        key="numeric_strategy_select",
-        help="auto: KNN for small datasets, MICE for large ones"
-    )
-    
-    st.subheader("Smart Cleaner")
-    conversion_threshold = st.slider(
-        "Conversion Threshold %",
-        0, 100, 60,
-        key="conversion_threshold_slider",
-        help="Minimum percentage of values that must be convertible"
-    ) / 100
-    
-    st.divider()
-    
-    if st.button("Reset All", key="reset_all_button", use_container_width=True):
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
-        st.rerun()
+
+    mode = st.radio("Mode", ["Simple", "Advanced"], horizontal=True, key="sidebar_mode")
+
+    if mode == "Simple":
+        st.caption("Using default settings. Switch to Advanced to customize.")
+        missing_threshold = 0.30
+        numeric_strategy = "auto"
+        conversion_threshold = 0.60
+
+    else:
+        st.subheader("Missing Value Handler")
+        missing_threshold = st.slider(
+            "Drop columns with missing % >",
+            0, 100,
+            value=st.session_state.get("missing_threshold_val", 30),
+            help="Columns with more than this percentage of missing values will be dropped"
+        ) / 100
+        st.session_state["missing_threshold_val"] = int(missing_threshold * 100)
+
+        numeric_strategy = st.selectbox(
+            "Numeric Imputation Strategy",
+            ['auto', 'knn', 'mice'],
+            key="numeric_strategy_select",
+            help="auto: KNN for small datasets, MICE for large ones"
+        )
+
+        st.subheader("Smart Cleaner")
+        conversion_threshold = st.slider(
+            "Conversion Threshold %",
+            0, 100,
+            value=st.session_state.get("conversion_threshold_val", 60),
+            help="Minimum percentage of values that must be convertible"
+        ) / 100
+        st.session_state["conversion_threshold_val"] = int(conversion_threshold * 100)
+
 
 st.divider()
 
@@ -706,32 +564,29 @@ if uploaded_file is not None:
 
     try:
         file_extension = uploaded_file.name.split('.')[-1].lower()
+        selected_sheet = None
 
-        if file_extension == 'csv':
-            df = pd.read_csv(uploaded_file, quotechar='"', skipinitialspace=True)
-
-        elif file_extension in ['xlsx', 'xls']:
-            # Check how many sheets the file has
-            xl = pd.ExcelFile(uploaded_file)
+        # Sheet selector for Excel (must happen before cached load)
+        if file_extension in ['xlsx', 'xls']:
+            xl_bytes = uploaded_file.read()
+            xl = pd.ExcelFile(io.BytesIO(xl_bytes))
             sheet_names = xl.sheet_names
-
             if len(sheet_names) > 1:
                 selected_sheet = st.selectbox(
                     f"This file has {len(sheet_names)} sheets. Select one to load:",
-                    sheet_names,
-                    key="sheet_selector"
+                    sheet_names, key="sheet_selector"
                 )
+                st.info(f"Loaded sheet: {selected_sheet}")
             else:
                 selected_sheet = sheet_names[0]
-
-            df = pd.read_excel(uploaded_file, sheet_name=selected_sheet)
-            if len(sheet_names) > 1:
-                st.info(f"Loaded sheet: {selected_sheet}")
+            file_bytes = xl_bytes
         else:
-            st.error("Unsupported file format. Please upload CSV or Excel file.")
-            st.stop()
+            file_bytes = uploaded_file.read()
 
-        # Reload if a new file is uploaded (compare filename + size)
+        # FIX #4 — cached file read; pass raw bytes so cache key is stable
+        df = load_file(file_bytes, uploaded_file.name, sheet_name=selected_sheet)
+
+        # Only reset session state when a genuinely new file is uploaded
         file_id = f"{uploaded_file.name}_{uploaded_file.size}"
         if st.session_state.get('loaded_file_id') != file_id:
             st.session_state.original_df = df.copy()
@@ -741,17 +596,17 @@ if uploaded_file is not None:
             st.session_state.selected_columns = {}
             st.session_state.val_selected = {}
             st.session_state.last_success_msg = None
-        
-        # Get current statistics
+
+        # FIX #2 — cached stats
         current_stats = get_dataframe_stats(st.session_state.current_df)
-        
+
         st.info(f"DataFrame: {current_stats['rows']} rows × {current_stats['columns']} columns | "
                f"Memory: {current_stats['memory_usage']:.2f} MB")
 
         # Statistics Dashboard
         st.subheader("Data Statistics")
         col1, col2, col3 = st.columns(3)
-        
+
         with col1:
             st.metric("Rows", current_stats['rows'],
                      delta=current_stats['rows'] - st.session_state.original_stats['rows'],
@@ -759,7 +614,7 @@ if uploaded_file is not None:
             st.metric("Columns", current_stats['columns'],
                      delta=current_stats['columns'] - st.session_state.original_stats['columns'],
                      delta_color="inverse")
-        
+
         with col2:
             st.metric("Missing Cells", current_stats['missing_cells'],
                      delta=current_stats['missing_cells'] - st.session_state.original_stats['missing_cells'],
@@ -767,24 +622,22 @@ if uploaded_file is not None:
             st.metric("Duplicate Rows", current_stats['duplicate_rows'],
                      delta=current_stats['duplicate_rows'] - st.session_state.original_stats['duplicate_rows'],
                      delta_color="inverse")
-        
+
         with col3:
             st.metric("Numeric Columns", current_stats['numeric_cols'])
             st.metric("Categorical Columns", current_stats['categorical_cols'])
 
         st.divider()
 
-        # ============================================================================
-        # PHASE 5: SMART RECOMMENDATIONS SECTION
-        # ============================================================================
-        
+        #SMART RECOMMENDATIONS
+
         st.subheader("Smart Recommendations")
-        
-        # Analyze data and generate recommendations
-        with st.spinner("Analyzing your data..."):
-            issues = analyze_data_issues(st.session_state.current_df, conversion_threshold)
-            recommendations = generate_recommendations(issues)
-        
+
+        # FIX #1 & #3 — single cached call, no spinner needed on cache hits
+        issues, recommendations = get_analysis_and_recommendations(
+            st.session_state.current_df, conversion_threshold
+        )
+
         if len(recommendations) == 0:
             if st.session_state.get('last_success_msg'):
                 st.success(st.session_state.last_success_msg)
@@ -792,19 +645,16 @@ if uploaded_file is not None:
             st.success("Your data looks clean! No issues detected.")
         else:
             st.warning(f"Found {len(recommendations)} potential issues in your data")
-            
-            # Show success message from previous fix action
+
             if st.session_state.get('last_success_msg'):
                 st.success(st.session_state.last_success_msg)
                 st.session_state.last_success_msg = None
-            
-            # Initialize session state for column selections
+
             if 'selected_columns' not in st.session_state:
                 st.session_state.selected_columns = {}
 
             for idx, (icon, title, description, action_key) in enumerate(recommendations):
 
-                # Get affected columns for this recommendation
                 affected_columns = []
                 if action_key == "strip_whitespace":
                     affected_columns = issues['whitespace_cols']
@@ -821,8 +671,6 @@ if uploaded_file is not None:
                 elif action_key == "handle_missing":
                     affected_columns = [col for col, pct in issues['missing_cols']]
 
-                # How many columns user has selected for this action
-                # Read from clean tracking dict, not widget keys
                 num_selected = len(st.session_state.selected_columns.get(action_key, []))
 
                 if affected_columns:
@@ -839,7 +687,6 @@ if uploaded_file is not None:
                             st.write(f"**Columns for: {title}**")
                             st.caption("Check the columns you want to fix")
 
-                            # on_change handlers write to selected_columns dict only
                             def make_apply_all_handler(ak, cols):
                                 def handler():
                                     if st.session_state.get(f"_widget_all_{ak}", False):
@@ -858,14 +705,12 @@ if uploaded_file is not None:
                                         st.session_state.selected_columns[ak] = [c for c in sel if c != col]
                                 return handler
 
-                            # Apply to all — no value= so Streamlit owns state fully
                             st.checkbox(
                                 "Apply to all columns",
                                 key=f"_widget_all_{action_key}",
                                 on_change=make_apply_all_handler(action_key, affected_columns)
                             )
 
-                            # Individual checkboxes — no value= 
                             for col in affected_columns:
                                 st.checkbox(
                                     col,
@@ -937,10 +782,10 @@ if uploaded_file is not None:
                                                 df_temp[col] = df_temp[col].astype(str).str.replace(r'^\W+', '', regex=True).str.replace(r'\W+$', '', regex=True)
 
                                     elif action_key == "handle_missing":
-                                        # Guard: only keep cols that still exist in df
                                         valid_cols = [c for c in selected_cols if c in df_temp.columns]
                                         if valid_cols:
                                             df_subset = df_temp[valid_cols].copy()
+                                            # FIX #5 — verbose=False avoids mid-run st.write() calls
                                             df_subset = missing_value_handler(df_subset, threshold=missing_threshold, numeric_strategy=numeric_strategy, verbose=False)
                                             for c in valid_cols:
                                                 if c in df_subset.columns:
@@ -948,7 +793,7 @@ if uploaded_file is not None:
 
                                     st.session_state.current_df = df_temp
                                     st.session_state.selected_columns.pop(action_key, None)
-                                    # Store message before rerun so it survives
+
                                     if action_key == "strip_whitespace":
                                         st.session_state.last_success_msg = f"Stripped whitespace from {len(selected_cols)} column(s)!"
                                     elif action_key in ["convert_currency", "convert_percentage", "convert_units", "convert_duration"]:
@@ -962,7 +807,6 @@ if uploaded_file is not None:
                                 st.error(f"Error: {str(e)}")
 
                 else:
-                    # No specific columns (duplicate rows/cols) — just Fix This directly
                     col1, col2 = st.columns([5, 1])
                     with col1:
                         st.write(f"{icon} **{title}**")
@@ -981,7 +825,7 @@ if uploaded_file is not None:
                             except Exception as e:
                                 st.error(f"Error: {str(e)}")
 
-                st.write("")  # spacing
+                st.write("")
 
             # Auto-fix all button
             if st.button("Auto-Fix All Issues", key="auto_fix_all", use_container_width=True, type="primary"):
@@ -1003,14 +847,11 @@ if uploaded_file is not None:
 
         st.divider()
 
-        # ============================================================================
-        # MANUAL CLEANING OPERATIONS (FROM PHASE 4)
-        # ============================================================================
+        # MANUAL CLEANING OPERATIONS
 
         st.subheader("Manual Cleaning Operations")
         st.markdown("Or choose specific operations to perform manually:")
 
-        # Row 1: Basic cleaning
         st.write("**Basic Cleaning**")
         col1, col2, col3, col4 = st.columns(4)
 
@@ -1022,7 +863,7 @@ if uploaded_file is not None:
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error: {str(e)}")
-        
+
         with col2:
             if st.button("Drop Duplicate Rows", key="manual_drop_dup_rows", use_container_width=True):
                 try:
@@ -1033,7 +874,7 @@ if uploaded_file is not None:
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error: {str(e)}")
-        
+
         with col3:
             if st.button("Drop Duplicate Columns", key="manual_drop_dup_cols", use_container_width=True):
                 try:
@@ -1044,23 +885,21 @@ if uploaded_file is not None:
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error: {str(e)}")
-        
+
         with col4:
             if st.button("Clean String Edges", key="manual_clean_edges", use_container_width=True, help="Remove unwanted edge characters"):
                 try:
                     with st.spinner("Cleaning string edges..."):
                         st.session_state.current_df = clean_string_edges(
-                            st.session_state.current_df,
-                            threshold=0.7,
-                            verbose=True
+                            st.session_state.current_df, threshold=0.7, verbose=False
                         )
+                    st.success("String edges cleaned!")
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error: {str(e)}")
 
-        st.write("")  # Spacing
+        st.write("")
 
-        # Row 2: Advanced cleaning
         st.write("**Advanced Cleaning**")
         col1, col2 = st.columns(2)
 
@@ -1069,43 +908,45 @@ if uploaded_file is not None:
                         help="Auto-detect and convert currency, percentages, units, durations"):
                 try:
                     with st.spinner("Analyzing and converting columns..."):
+                        # FIX #5 — verbose=False, show result message after instead
                         st.session_state.current_df = smart_column_cleaner(
                             st.session_state.current_df,
                             conversion_threshold=conversion_threshold,
-                            verbose=True
+                            verbose=False
                         )
+                    st.success("Columns converted!")
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error: {str(e)}")
-        
+
         with col2:
             if st.button("Handle Missing Values", key="manual_missing_handler", use_container_width=True,
                         help="Intelligent imputation using KNN/MICE"):
                 try:
                     with st.spinner("Handling missing values (this may take a moment)..."):
+                        # FIX #5 — verbose=False, show result message after instead
                         st.session_state.current_df = missing_value_handler(
                             st.session_state.current_df,
                             threshold=missing_threshold,
                             numeric_strategy=numeric_strategy,
-                            verbose=True
+                            verbose=False
                         )
+                    st.success("Missing values handled!")
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error: {str(e)}")
 
         st.write("")
 
-        # Row 3: Validation & Quality
+        # Validation & Quality
         st.write("**Validation & Quality**")
 
-        # Initialize validation selection state
         if 'val_selected' not in st.session_state:
             st.session_state.val_selected = {}
 
-        text_cols  = list(st.session_state.current_df.select_dtypes(include='object').columns)
-        num_cols   = list(st.session_state.current_df.select_dtypes(include=np.number).columns)
+        text_cols = list(st.session_state.current_df.select_dtypes(include='object').columns)
+        num_cols  = list(st.session_state.current_df.select_dtypes(include=np.number).columns)
 
-        # Helper to build on_change handlers for validation popovers
         def make_val_all_handler(section, cols):
             def handler():
                 if st.session_state.get(f"_vall_{section}", False):
@@ -1125,25 +966,18 @@ if uploaded_file is not None:
             return handler
 
         def col_popover(section, available_cols):
-            """Renders the column selector popover and returns selected count."""
             n = len(st.session_state.val_selected.get(section, []))
-            label = f"v {n} selected" if n > 0 else "v Select columns"
+            label = f"{n} selected" if n > 0 else "Select columns"
             with st.popover(label, use_container_width=True):
                 st.caption("Select columns to apply this operation")
-                st.checkbox(
-                    "Apply to all",
-                    key=f"_vall_{section}",
-                    on_change=make_val_all_handler(section, available_cols)
-                )
+                st.checkbox("Apply to all", key=f"_vall_{section}",
+                            on_change=make_val_all_handler(section, available_cols))
                 for col in available_cols:
-                    st.checkbox(
-                        col,
-                        key=f"_valc_{section}_{col}",
-                        on_change=make_val_col_handler(section, col)
-                    )
+                    st.checkbox(col, key=f"_valc_{section}_{col}",
+                                on_change=make_val_col_handler(section, col))
             return n
 
-        # --- Email Validation ---
+        # Email Validation
         if text_cols:
             c1, c2, c3 = st.columns([5, 1.4, 1])
             with c1:
@@ -1170,7 +1004,7 @@ if uploaded_file is not None:
 
         st.write("")
 
-        # --- Phone Standardization ---
+        # Phone Standardization
         if text_cols:
             c1, c2, c3 = st.columns([5, 1.4, 1])
             with c1:
@@ -1194,7 +1028,7 @@ if uploaded_file is not None:
 
         st.write("")
 
-        # --- Date Standardization ---
+        # Date Standardization
         if text_cols:
             c1, c2, c3 = st.columns([5, 1.4, 1])
             with c1:
@@ -1223,7 +1057,7 @@ if uploaded_file is not None:
 
         st.write("")
 
-        # --- Cap Outliers ---
+        # Cap Outliers
         if num_cols:
             c1, c2, c3 = st.columns([5, 1.4, 1])
             with c1:
@@ -1262,7 +1096,7 @@ if uploaded_file is not None:
 
         st.write("")
 
-        # --- Validate Range ---
+        # Validate Range
         if num_cols:
             c1, c2, c3 = st.columns([5, 1.4, 1])
             with c1:
@@ -1307,8 +1141,7 @@ if uploaded_file is not None:
         st.dataframe(st.session_state.current_df.head(preview_rows), use_container_width=True)
 
         st.divider()
-        
-        # Column information expander
+
         with st.expander("Column Data Types & Information", expanded=False):
             col_types = pd.DataFrame({
                 'Column': st.session_state.current_df.columns,
@@ -1323,9 +1156,9 @@ if uploaded_file is not None:
 
         # Download section
         st.subheader("Download Cleaned Data")
-        
+
         col1, col2, col3 = st.columns(3)
-        
+
         with col1:
             csv = st.session_state.current_df.to_csv(index=False).encode('utf-8')
             st.download_button(
@@ -1336,13 +1169,13 @@ if uploaded_file is not None:
                 key="download_csv_button",
                 use_container_width=True
             )
-        
+
         with col2:
             buffer = io.BytesIO()
             with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
                 st.session_state.current_df.to_excel(writer, index=False, sheet_name='Cleaned Data')
                 st.session_state.original_df.to_excel(writer, index=False, sheet_name='Original Data')
-            
+
             st.download_button(
                 label="Download as Excel",
                 data=buffer.getvalue(),
@@ -1351,13 +1184,11 @@ if uploaded_file is not None:
                 key="download_excel_button",
                 use_container_width=True
             )
-        
+
         with col3:
             if st.button("Reset to Original", key="reset_to_original_button", use_container_width=True):
-                # Only reset the dataframe, don't clear the file uploader
                 if 'original_df' in st.session_state:
                     st.session_state.current_df = st.session_state.original_df.copy()
-                    # Clear column selection state
                     if 'show_columns_for' in st.session_state:
                         st.session_state.show_columns_for = None
                     if 'selected_columns' in st.session_state:
@@ -1371,7 +1202,7 @@ if uploaded_file is not None:
 
 else:
     st.warning("Please upload a CSV or Excel file to begin cleaning.")
-    
+
     with st.expander("Sample Data Format"):
         sample_df = pd.DataFrame({
             'name': [' Alice ', 'Bob', 'Charlie', 'Alice'],
