@@ -87,7 +87,7 @@ button[data-baseweb="tab"] {
 """, unsafe_allow_html=True)
 
 
-#  cleaning helpers
+# cleaning helpers 
 
 def checking_valid_input(df):
     if not isinstance(df, pd.DataFrame):
@@ -453,7 +453,7 @@ def build_pipeline_script(history):
     return "\n".join(lines)
 
 
-#cached functions
+# cached functions 
 
 @st.cache_data(show_spinner=False)
 def load_file(file_bytes, filename, file_id, sheet_name=None):
@@ -557,10 +557,12 @@ def get_analysis_and_recommendations(df, conversion_threshold):
         recs.append(("", f"{len(issues['edge_char_cols'])} columns have unwanted edge characters", f"Columns: {', '.join(issues['edge_char_cols'][:3])}", "clean_edges"))
     return issues, recs
 
-# sidebar 
+
+# sidebar — once
 with st.sidebar:
     st.header("Settings")
-    mode = st.radio("Mode", ["Simple", "Advanced"], horizontal=True, key="mode_radio")
+    mode = st.radio("Mode", ["Simple", "Advanced"], horizontal=True, key="mode_radio",
+        help="Simple uses sensible defaults so you can start cleaning right away. Advanced lets you tune the thresholds manually.")
     if mode == "Simple":
         st.caption("Using default settings. Switch to Advanced to customize.")
         missing_threshold = 0.30
@@ -570,28 +572,22 @@ with st.sidebar:
         st.subheader("Missing Value Handler")
         missing_threshold = st.slider(
             "Drop columns with missing % >", 0, 100,
-            value=st.session_state.get("missing_threshold_val", 30)
+            value=st.session_state.get("missing_threshold_val", 30),
+            help="Columns where more than this % of values are missing will be dropped entirely. Default 30% — raise it if you want to keep sparser columns, lower it to be stricter."
         ) / 100
         st.session_state["missing_threshold_val"] = int(missing_threshold * 100)
         numeric_strategy = st.selectbox(
             "Numeric Imputation Strategy", ["auto", "knn", "mice"],
-            key="numeric_strategy_select"
+            key="numeric_strategy_select",
+            help="auto: picks KNN for small files and MICE for large ones. KNN: fills missing values using the k nearest similar rows — fast and good for most cases. MICE: iteratively models each column — more accurate but slower, best for large datasets with lots of missing data."
         )
         st.subheader("Smart Cleaner")
         conversion_threshold = st.slider(
             "Conversion Threshold %", 0, 100,
-            value=st.session_state.get("conversion_threshold_val", 60)
+            value=st.session_state.get("conversion_threshold_val", 60),
+            help="How many values in a column must match a pattern before the whole column gets converted. At 60%, if 60% of values look like currency then the whole column is converted. Lower it to convert more aggressively, raise it to be more conservative."
         ) / 100
         st.session_state["conversion_threshold_val"] = int(conversion_threshold * 100)
-        st.divider()
-        if st.button("Reset All", key="reset_all_btn", use_container_width=True):
-            for k in list(st.session_state.keys()):
-                if k != "mode_radio":
-                    del st.session_state[k]
-            st.session_state["missing_threshold_val"] = 30
-            st.session_state["conversion_threshold_val"] = 60
-            st.cache_data.clear()
-            st.rerun()
 
 
 # tabs sit at the very top — navbar style
@@ -902,7 +898,8 @@ else:
             st.write("**Basic Cleaning**")
             c1, c2, c3, c4 = st.columns(4)
             with c1:
-                if st.button("Strip Whitespace", key="ws_btn", use_container_width=True):
+                if st.button("Strip Whitespace", key="ws_btn", use_container_width=True,
+                             help="Removes leading and trailing spaces from all text columns. e.g. '  Alice ' becomes 'Alice'."):
                     try:
                         push_history("Strip Whitespace")
                         st.session_state.current_df = stripping_whitespace(cdf)
@@ -912,7 +909,8 @@ else:
                 if st.session_state.get("_omsg", ("",))[0] == "ws_btn":
                     st.success(st.session_state.pop("_omsg")[1])
             with c2:
-                if st.button("Drop Duplicate Rows", key="ddr_btn", use_container_width=True):
+                if st.button("Drop Duplicate Rows", key="ddr_btn", use_container_width=True,
+                             help="Removes rows that are completely identical to another row. Keeps the first occurrence."):
                     try:
                         push_history("Drop Duplicate Rows")
                         before = len(cdf)
@@ -924,7 +922,8 @@ else:
                 if st.session_state.get("_omsg", ("",))[0] == "ddr_btn":
                     st.success(st.session_state.pop("_omsg")[1])
             with c3:
-                if st.button("Drop Duplicate Cols", key="ddc_btn", use_container_width=True):
+                if st.button("Drop Duplicate Cols", key="ddc_btn", use_container_width=True,
+                             help="Removes columns that have the same name or identical values as another column."):
                     try:
                         push_history("Drop Duplicate Columns")
                         before = cdf.shape[1]
@@ -936,7 +935,8 @@ else:
                 if st.session_state.get("_omsg", ("",))[0] == "ddc_btn":
                     st.success(st.session_state.pop("_omsg")[1])
             with c4:
-                if st.button("Clean String Edges", key="cse_btn", use_container_width=True):
+                if st.button("Clean String Edges", key="cse_btn", use_container_width=True,
+                             help="Removes unwanted special characters from the start and end of text values. e.g. '$hello$' becomes 'hello'."):
                     try:
                         push_history("Clean String Edges")
                         st.session_state.current_df = clean_string_edges(cdf, threshold=0.7)
@@ -950,7 +950,8 @@ else:
             st.write("**Advanced Cleaning**")
             c1, c2 = st.columns(2)
             with c1:
-                if st.button("Smart Column Cleaner", key="scc_btn", use_container_width=True):
+                if st.button("Smart Column Cleaner", key="scc_btn", use_container_width=True,
+                             help="Auto-detects and converts columns that look like currency, percentages, units, or durations into proper numeric values."):
                     try:
                         push_history("Smart Column Cleaner")
                         with st.spinner("Converting..."):
@@ -961,7 +962,8 @@ else:
                 if st.session_state.get("_omsg", ("",))[0] == "scc_btn":
                     st.success(st.session_state.pop("_omsg")[1])
             with c2:
-                if st.button("Handle Missing Values", key="hmv_btn", use_container_width=True):
+                if st.button("Handle Missing Values", key="hmv_btn", use_container_width=True,
+                             help="Fills in missing values using KNN imputation for numeric columns (uses nearby similar rows to estimate the value) and mode for text columns."):
                     try:
                         push_history("Handle Missing Values")
                         with st.spinner("Imputing..."):
@@ -976,7 +978,17 @@ else:
             st.write("**Find & Replace**")
             fr1, fr2 = st.columns([3, 1])
             with fr1: fr_col = st.selectbox("Column", all_cols, key="fr_col")
-            with fr2: fr_regex = st.checkbox("Use Regex", key="fr_regex")
+            with fr2: fr_regex = st.checkbox("Use Regex", key="fr_regex",
+                help=(
+                    "Regex lets you match patterns instead of exact text.\n\n"
+                    "Leave OFF for simple replacements like swapping 'N/A' with nothing.\n\n"
+                    "Turn ON when you need patterns:\n"
+                    "- Remove all digits: find '\\d+', replace with ''\n"
+                    "- Remove all letters: find '[a-zA-Z]+', replace with ''\n"
+                    "- Match $ or £ or €: find '[$£€]', replace with ''\n"
+                    "- Remove anything in brackets: find '\\(.*?\\)', replace with ''\n"
+                    "- Match extra spaces: find '\\s+', replace with ' '"
+                ))
             fr3, fr4, fr5 = st.columns([2, 2, 1])
             with fr3: fr_find = st.text_input("Find", key="fr_find", placeholder="e.g. N/A")
             with fr4: fr_replace = st.text_input("Replace with", key="fr_replace", placeholder="leave blank to delete")
@@ -997,7 +1009,8 @@ else:
             st.write("**Column Type Override**")
             to1, to2, to3 = st.columns([3, 2, 1])
             with to1: ov_col = st.selectbox("Column", all_cols, key="ov_col")
-            with to2: ov_type = st.selectbox("Cast to", ["string (object)", "integer (int64)", "float (float64)", "datetime", "boolean", "category"], key="ov_type")
+            with to2: ov_type = st.selectbox("Cast to", ["string (object)", "integer (int64)", "float (float64)", "datetime", "boolean", "category"], key="ov_type",
+                help="string: plain text. integer: whole numbers. float: decimals. datetime: dates/times. boolean: true/false values. category: fixed set of labels (saves memory).")
             with to3:
                 st.write(""); st.write("")
                 if st.button("Apply", key="ov_apply", type="primary", use_container_width=True):
@@ -1027,7 +1040,8 @@ else:
                 v1, v2, v3 = st.columns([5, 1.4, 1])
                 with v1:
                     st.caption("Flag adds a boolean column. Remove drops invalid rows.")
-                    ea = st.radio("", ["Flag invalid", "Remove invalid rows"], key="email_radio", horizontal=True, label_visibility="collapsed")
+                    ea = st.radio("", ["Flag invalid", "Remove invalid rows"], key="email_radio", horizontal=True, label_visibility="collapsed",
+                        help="Flag: adds an 'email_valid' boolean column so you can review invalid ones. Remove: deletes rows where the email doesn't match the standard format.")
                 with v2: n_em = col_popover("email", text_cols)
                 with v3:
                     if st.button("Run", key="run_email", disabled=n_em == 0, type="primary" if n_em else "secondary", use_container_width=True):
@@ -1067,7 +1081,8 @@ else:
                 st.divider()
                 st.write("**Standardize Dates**")
                 v1, v2, v3 = st.columns([5, 1.4, 1])
-                with v1: date_fmt = st.selectbox("Output format", ["%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y"], key="date_fmt")
+                with v1: date_fmt = st.selectbox("Output format", ["%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y"], key="date_fmt",
+                    help="%Y-%m-%d = 2023-01-15 (recommended, sorts correctly). %d/%m/%Y = 15/01/2023 (common in Europe). %m/%d/%Y = 01/15/2023 (US format).")
                 with v2: n_dt = col_popover("date", text_cols)
                 with v3:
                     st.write("")
@@ -1091,9 +1106,12 @@ else:
                 v1, v2, v3 = st.columns([5, 1.4, 1])
                 with v1:
                     o1, o2, o3 = st.columns(3)
-                    with o1: o_method = st.selectbox("Method", ["iqr", "zscore"], key="o_method")
-                    with o2: o_action = st.selectbox("Action", ["cap", "remove"], key="o_action")
-                    with o3: o_thresh = st.number_input("Threshold", min_value=0.5, max_value=10.0, value=1.5, step=0.5, key="o_thresh")
+                    with o1: o_method = st.selectbox("Method", ["iqr", "zscore"], key="o_method",
+                        help="IQR: uses the spread of the middle 50% of data — good for skewed data and most cases. Z-score: uses standard deviations from the mean — better for normally distributed data.")
+                    with o2: o_action = st.selectbox("Action", ["cap", "remove"], key="o_action",
+                        help="Cap: clips outliers to the boundary value instead of deleting them — safer, keeps row count. Remove: deletes the entire row containing the outlier.")
+                    with o3: o_thresh = st.number_input("Threshold", min_value=0.5, max_value=10.0, value=1.5, step=0.5, key="o_thresh",
+                        help="For IQR: multiplier of the IQR range — 1.5 is standard, 3.0 is more lenient. For Z-score: number of standard deviations — 2.0 catches ~5% of data, 3.0 catches ~0.3%.")
                 with v2: n_out = col_popover("outlier", num_cols)
                 with v3:
                     st.write(""); st.write("")
@@ -1120,7 +1138,8 @@ else:
                     r1, r2, r3 = st.columns(3)
                     with r1: rng_min = st.number_input("Min", value=0.0, key="rng_min")
                     with r2: rng_max = st.number_input("Max", value=100.0, key="rng_max")
-                    with r3: rng_act = st.selectbox("Action", ["flag", "remove"], key="rng_act")
+                    with r3: rng_act = st.selectbox("Action", ["flag", "remove"], key="rng_act",
+                        help="Flag: adds a new boolean column showing which rows are in range — non-destructive. Remove: deletes rows where the value falls outside the min/max.")
                 with v2: n_rng = col_popover("range", num_cols)
                 with v3:
                     st.write(""); st.write("")
