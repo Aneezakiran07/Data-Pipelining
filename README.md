@@ -135,3 +135,5 @@ Two test files are included in the repo.
 `test_data.csv` — a single CSV covering every error type the app handles. Mixed date formats, invalid emails, messy phone numbers, currency strings, percentages, unit values, duration strings, missing values, whitespace, and duplicate rows.
 
 `test_multisheet.xlsx` — an Excel file with three sheets (Employees, Sales, Products), each with a different set of messy columns. Use this to test the sheet selector and verify that switching sheets loads the correct data.
+
+
