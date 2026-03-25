@@ -8,6 +8,7 @@ from pipeline import (
     import_pipeline_json,
     undo_last,
 )
+from reporting import build_report_pdf
 
 
 def _render_reset():
@@ -154,12 +155,15 @@ def _render_pipeline_json(hist, settings):
                             + ", ".join(skipped[:5])
                             + ("..." if len(skipped) > 5 else "")
                         )
-                    st.session_state.last_success_msg = " ".join(msg_parts)
+                    st.session_state["_omsg"] = ("apply_json", " ".join(msg_parts))
                     st.session_state.pop("_json_bytes", None)
                     st.session_state.pop("_json_file_key", None)
                     st.rerun()
                 except Exception as e:
                     st.error(f"Could not apply pipeline: {e}")
+
+        if st.session_state.get("_omsg", ("",))[0] == "apply_json":
+            st.success(st.session_state.pop("_omsg")[1])
 
 
 def _render_python_export(hist):
@@ -182,14 +186,58 @@ def _render_python_export(hist):
         st.code(script, language="python")
 
 
+def _render_report_pdf(cdf, hist, filename):
+    st.subheader("Export Cleaning Report")
+    st.caption(
+        "generates a PDF report with a before and after summary, "
+        "column profiles, missing value breakdown, cleaning steps, "
+        "and a sample of the cleaned data."
+    )
+
+    if not hist:
+        st.caption("run at least one cleaning operation to generate a report.")
+        return
+
+    if st.button("Generate Report", key="gen_pdf", type="primary", use_container_width=True):
+        try:
+            with st.spinner("building report..."):
+                pdf_bytes = build_report_pdf(
+                    original_df=st.session_state.original_df,
+                    cleaned_df=cdf,
+                    history=hist,
+                    filename=filename,
+                )
+            st.session_state["_pdf_bytes"] = pdf_bytes
+            st.session_state["_pdf_ready"] = True
+        except Exception as e:
+            st.error(f"could not generate PDF: {e}")
+            st.session_state["_pdf_ready"] = False
+
+    if st.session_state.get("_pdf_ready") and st.session_state.get("_pdf_bytes"):
+        st.success("report ready.")
+        st.download_button(
+            "Download cleaning_report.pdf",
+            data=st.session_state["_pdf_bytes"],
+            file_name="cleaning_report.pdf",
+            mime="application/pdf",
+            key="dl_pdf",
+            use_container_width=True,
+        )
+
+
 def render(tab, cdf, settings):
+    filename = settings.get("filename", "dataset")
     with tab:
         _render_reset()
         st.divider()
         _render_download(cdf)
+        st.divider()
+        _render_report_pdf(cdf, st.session_state.get("history", []), filename)
         st.divider()
         _render_history(st.session_state.get("history", []))
         st.divider()
         _render_pipeline_json(st.session_state.get("history", []), settings)
         st.divider()
         _render_python_export(st.session_state.get("history", []))
+
+        
