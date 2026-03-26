@@ -20,47 +20,47 @@ Upload a CSV or Excel file and the app scans it, tells you what is wrong, and le
 
 ### Navbar Tab Layout
 
-The app is organized into tabs at the top of the page like a website navbar Upload Overview Recommendations Clean Validate Profile and History and Export. Each tab focuses on one task so the workflow stays clear.
+- The app is organized into tabs at the top of the page like a website navbar Upload Overview Recommendations Clean Validate Profile and History and Export. Each tab focuses on one task so the workflow stays clear.
 
 ### Smart Recommendations
 
-When you upload a file the app analyzes every column and surfaces detected issues. Each issue appears as a row with a description and a column selector dropdown. You choose columns and apply fixes or run Auto Fix All to execute the full pipeline.
+- When you upload a file the app analyzes every column and surfaces detected issues. Each issue appears as a row with a description and a column selector dropdown. You choose columns and apply fixes or run Auto Fix All to execute the full pipeline.
 
 ### Manual Cleaning
 
-All operations are available in the Clean tab. This includes basic cleaning advanced cleaning find and replace and column type override using the same column selection pattern.
+- All operations are available in the Clean tab. This includes basic cleaning advanced cleaning find and replace and column type override using the same column selection pattern.
 
 ### Data Quality Score
 
-A score from 0 to 100 is shown at the top of the Overview tab. It is computed across five dimensions completeness uniqueness type consistency outlier cleanliness and validity. Each dimension contributes equally. The score is color coded with green above 80 amber between 55 and 80 and red below 55. It updates automatically as the dataset changes so improvements are visible in real time. A breakdown section shows each dimension score out of 20 with a short explanation.
+- A score from 0 to 100 is shown at the top of the Overview tab. It is computed across five dimensions completeness uniqueness type consistency outlier cleanliness and validity. Each dimension contributes equally. The score is color coded with green above 80 amber between 55 and 80 and red below 55. It updates automatically as the dataset changes so improvements are visible in real time. A breakdown section shows each dimension score out of 20 with a short explanation.
 
 ### Data Type Guesser
 
-A section in the Clean tab scans all columns and suggests correct data types based on actual values. It detects patterns like email boolean currency percentage units durations datetime numeric strings and low cardinality categories. Each suggestion includes confidence percentage reason and sample values. Users can select multiple suggestions and apply them in one action.
+- A section in the Clean tab scans all columns and suggests correct data types based on actual values. It detects patterns like email boolean currency percentage units durations datetime numeric strings and low cardinality categories. Each suggestion includes confidence percentage reason and sample values. Users can select multiple suggestions and apply them in one action.
 
 ### Validation and Quality Checks
 
-Email phone date outlier and range validation live in the Validate tab. Each follows the same select columns then run pattern.
+- Email phone date outlier and range validation live in the Validate tab. Each follows the same select columns then run pattern.
 
 ### Column Profiler
 
-The Profile tab shows per column statistics including min max mean median standard deviation skewness null percentage and sample values. It also includes a before and after comparison view to track exact changes.
+- The Profile tab shows per column statistics including min max mean median standard deviation skewness null percentage and sample values. It also includes a before and after comparison view to track exact changes.
 
 ### Correlation Heatmap
 
-The Profile tab includes a correlation matrix for numeric columns. It supports Pearson Spearman and Kendall methods. Strong relationships are highlighted so redundant columns can be identified quickly. A short summary surfaces the strongest pairs.
+- The Profile tab includes a correlation matrix for numeric columns. It supports Pearson Spearman and Kendall methods. Strong relationships are highlighted so redundant columns can be identified quickly. A short summary surfaces the strongest pairs.
 
 ### Cleaning History and Undo
 
-Every operation is recorded in the History and Export tab with dataset shape at that step. You can undo the last action or clear the full history. Up to 20 steps are stored.
+- Every operation is recorded in the History and Export tab with dataset shape at that step. You can undo the last action or clear the full history. Up to 20 steps are stored.
 
 ### Pipeline Export and Reload
 
-Cleaning steps can be exported as a pipeline.py script with runnable Python code. The workflow can also be saved as a pipeline.json file containing step labels. Uploading this file on a new dataset replays all automatable steps in order while skipping steps that require manual input.
+- Cleaning steps can be exported as a pipeline.py script with runnable Python code. The workflow can also be saved as a pipeline.json file containing step labels. Uploading this file on a new dataset replays all automatable steps in order while skipping steps that require manual input.
 
 ### Cleaning Report PDF
 
-A full PDF report can be generated after cleaning. It includes before and after dataset summary column profiles missing value breakdown applied steps with dataset shape and a sample of cleaned data. The report updates only when the cleaning history changes.
+- A full PDF report can be generated after cleaning. It includes before and after dataset summary column profiles missing value breakdown applied steps with dataset shape and a sample of cleaned data. The report updates only when the cleaning history changes.
 
 ---
 
