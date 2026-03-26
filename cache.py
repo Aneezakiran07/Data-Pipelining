@@ -417,5 +417,122 @@ def get_type_suggestions(df):
     return sorted(suggestions, key=lambda x: x["confidence"], reverse=True)
 
 
+@st.cache_data(show_spinner=False)
+def get_quality_score(df):
+    # computes a data quality score from 0 to 100 across five dimensions.
+    # each dimension contributes 20 points. the score updates live as the
+    # user cleans because cache busts whenever the dataframe changes.
+    # returns the total score and a breakdown dict for rendering.
 
-    
+    total_cells = df.shape[0] * df.shape[1]
+    if total_cells == 0:
+        return {"total": 0, "breakdown": {}}
+
+    n_rows = len(df)
+    n_cols = df.shape[1]
+
+    # dimension 1: completeness (missing values)
+    # 20 points. deducted proportionally to the fraction of missing cells.
+    missing_frac = df.isna().sum().sum() / total_cells
+    completeness_score = round(20 * (1 - missing_frac))
+
+    # dimension 2: uniqueness (duplicate rows)
+    # 20 points. deducted proportionally to the fraction of duplicate rows.
+    dup_frac = df.duplicated().sum() / max(n_rows, 1)
+    uniqueness_score = round(20 * (1 - dup_frac))
+
+    # dimension 3: type consistency
+    # 20 points. one point deducted per column where more than 20% of values
+    # look like a different type than the column currently stores.
+    # checks string columns for numeric content and object columns storing numbers.
+    inconsistent_cols = 0
+    for col in df.select_dtypes(include="object").columns:
+        s = df[col].dropna().astype(str).str.strip()
+        if len(s) == 0:
+            continue
+        # if most values are numeric but column is object, that is inconsistent
+        numeric_frac = pd.to_numeric(
+            s.str.replace(r"[^\d.\-]", "", regex=True).replace("", np.nan),
+            errors="coerce"
+        ).notna().mean()
+        if numeric_frac > 0.7:
+            inconsistent_cols += 1
+    type_score = round(max(0, 20 - (inconsistent_cols / max(n_cols, 1)) * 20))
+
+    # dimension 4: outlier cleanliness
+    # 20 points. deducted proportionally to the fraction of numeric values
+    # that sit outside 3x IQR fences. using 3x instead of 1.5x to only
+    # flag extreme outliers that are likely errors rather than natural spread.
+    num_cols = df.select_dtypes(include=np.number).columns
+    outlier_fracs = []
+    for col in num_cols:
+        s = df[col].dropna()
+        if len(s) < 4:
+            continue
+        q1, q3 = s.quantile(0.25), s.quantile(0.75)
+        iqr = q3 - q1
+        if iqr == 0:
+            continue
+        outlier_frac = ((s < q1 - 3 * iqr) | (s > q3 + 3 * iqr)).mean()
+        outlier_fracs.append(outlier_frac)
+    avg_outlier_frac = float(np.mean(outlier_fracs)) if outlier_fracs else 0.0
+    outlier_score = round(max(0, 20 * (1 - avg_outlier_frac * 5)))
+
+    # dimension 5: validity (format correctness)
+    # 20 points. checks string columns for common invalid patterns:
+    # placeholder text like None, NA, unknown, n/a, null, ?, empty strings.
+    invalid_pattern = r"^(none|na|n/a|null|unknown|\?|nan|-|)$"
+    invalid_fracs = []
+    for col in df.select_dtypes(include="object").columns:
+        s = df[col].dropna().astype(str).str.strip().str.lower()
+        if len(s) == 0:
+            continue
+        invalid_frac = s.str.match(invalid_pattern, na=False).mean()
+        invalid_fracs.append(invalid_frac)
+    avg_invalid_frac = float(np.mean(invalid_fracs)) if invalid_fracs else 0.0
+    validity_score = round(max(0, 20 * (1 - avg_invalid_frac * 3)))
+
+    total = min(100, completeness_score + uniqueness_score + type_score + outlier_score + validity_score)
+
+    def grade(s):
+        if s >= 18:
+            return "good"
+        if s >= 12:
+            return "fair"
+        return "poor"
+
+    return {
+        "total": total,
+        "breakdown": {
+            "Completeness": {
+                "score": completeness_score,
+                "max": 20,
+                "grade": grade(completeness_score),
+                "detail": f"{int(missing_frac * total_cells)} missing cells ({missing_frac*100:.1f}%)",
+            },
+            "Uniqueness": {
+                "score": uniqueness_score,
+                "max": 20,
+                "grade": grade(uniqueness_score),
+                "detail": f"{int(dup_frac * n_rows)} duplicate rows ({dup_frac*100:.1f}%)",
+            },
+            "Type Consistency": {
+                "score": type_score,
+                "max": 20,
+                "grade": grade(type_score),
+                "detail": f"{inconsistent_cols} column(s) storing numbers as text",
+            },
+            "Outlier Cleanliness": {
+                "score": outlier_score,
+                "max": 20,
+                "grade": grade(outlier_score),
+                "detail": f"{avg_outlier_frac*100:.1f}% of numeric values are extreme outliers",
+            },
+            "Validity": {
+                "score": validity_score,
+                "max": 20,
+                "grade": grade(validity_score),
+                "detail": f"{avg_invalid_frac*100:.1f}% of text values are placeholder or invalid strings",
+            },
+        },
+    }
