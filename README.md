@@ -1,6 +1,6 @@
 # Advanced Data Cleaning Pipeline
 
-A Streamlit app that takes messy data files and cleans them — automatically or manually, column by column.
+A Streamlit app that takes messy data files and cleans them automatically or manually, column by column.
 
 ---
 
@@ -12,7 +12,7 @@ https://data-pipelining-qnddvbut7ayklccgo5cp8v.streamlit.app/
 
 ## What It Does
 
-Upload a CSV or Excel file and the app scans it, tells you what is wrong, and lets you fix it. You can let the pipeline handle everything automatically or go through each issue yourself and decide exactly which columns to touch. Every action is tracked, undoable, and exportable as a reusable Python script.
+Upload a CSV or Excel file and the app scans it, tells you what is wrong, and lets you fix it. You can let the pipeline handle everything automatically or go through each issue yourself and decide exactly which columns to touch. Every action is tracked, undoable, exportable, and now also reusable across datasets.
 
 ---
 
@@ -20,31 +20,47 @@ Upload a CSV or Excel file and the app scans it, tells you what is wrong, and le
 
 ### Navbar Tab Layout
 
-The app is organized into six tabs that sit at the top of the page like a website navbar — Upload, Overview, Recommendations, Clean, Validate, Profile, and History & Export. No scrolling through a long page. Each tab has one job.
+The app is organized into tabs at the top of the page like a website navbar Upload Overview Recommendations Clean Validate Profile and History and Export. Each tab focuses on one task so the workflow stays clear.
 
 ### Smart Recommendations
 
-When you upload a file the app analyzes every column and surfaces a list of detected issues. Each issue shows up as a plain row with a description. Next to it is a column selector dropdown — click it, pick which columns you want to apply the fix to, and hit Fix. The button stays disabled until at least one column is selected. You can also hit Auto-Fix All to run the full pipeline in one shot.
+When you upload a file the app analyzes every column and surfaces detected issues. Each issue appears as a row with a description and a column selector dropdown. You choose columns and apply fixes or run Auto Fix All to execute the full pipeline.
 
 ### Manual Cleaning
 
-Every operation is also available as a manual button in the Clean tab. Basic cleaning, advanced cleaning, find and replace, and column type override all live here with the same column-selection pattern.
+All operations are available in the Clean tab. This includes basic cleaning advanced cleaning find and replace and column type override using the same column selection pattern.
+
+### Data Quality Score
+
+A score from 0 to 100 is shown at the top of the Overview tab. It is computed across five dimensions completeness uniqueness type consistency outlier cleanliness and validity. Each dimension contributes equally. The score is color coded with green above 80 amber between 55 and 80 and red below 55. It updates automatically as the dataset changes so improvements are visible in real time. A breakdown section shows each dimension score out of 20 with a short explanation.
+
+### Data Type Guesser
+
+A section in the Clean tab scans all columns and suggests correct data types based on actual values. It detects patterns like email boolean currency percentage units durations datetime numeric strings and low cardinality categories. Each suggestion includes confidence percentage reason and sample values. Users can select multiple suggestions and apply them in one action.
 
 ### Validation and Quality Checks
 
-Email, phone, date, outlier, and range validation all live in the Validate tab. Each one uses the same select-columns-then-run pattern.
+Email phone date outlier and range validation live in the Validate tab. Each follows the same select columns then run pattern.
 
 ### Column Profiler
 
-The Profile tab shows per-column stats — min, max, mean, median, std, skewness, null percentage, and sample values — in a single table. It also has a before/after comparison view where you pick a column and see original values side by side with current cleaned values, with changed rows marked.
+The Profile tab shows per column statistics including min max mean median standard deviation skewness null percentage and sample values. It also includes a before and after comparison view to track exact changes.
+
+### Correlation Heatmap
+
+The Profile tab includes a correlation matrix for numeric columns. It supports Pearson Spearman and Kendall methods. Strong relationships are highlighted so redundant columns can be identified quickly. A short summary surfaces the strongest pairs.
 
 ### Cleaning History and Undo
 
-Every operation is recorded in the History & Export tab with the row and column count at the time it ran. You can undo the last step or clear the whole history. Max 20 steps are kept.
+Every operation is recorded in the History and Export tab with dataset shape at that step. You can undo the last action or clear the full history. Up to 20 steps are stored.
 
-### Pipeline Export
+### Pipeline Export and Reload
 
-Once you have cleaned a file, the History & Export tab lets you download your cleaning steps as a `pipeline.py` script. The script contains real runnable Python code — not just comments — for every operation you ran. You can reuse it on new files of the same format without opening the app again.
+Cleaning steps can be exported as a pipeline.py script with runnable Python code. The workflow can also be saved as a pipeline.json file containing step labels. Uploading this file on a new dataset replays all automatable steps in order while skipping steps that require manual input.
+
+### Cleaning Report PDF
+
+A full PDF report can be generated after cleaning. It includes before and after dataset summary column profiles missing value breakdown applied steps with dataset shape and a sample of cleaned data. The report updates only when the cleaning history changes.
 
 ---
 
@@ -53,29 +69,29 @@ Once you have cleaned a file, the History & Export tab lets you download your cl
 - Strip leading and trailing whitespace from text columns
 - Drop duplicate rows and duplicate columns
 - Clean unwanted edge characters from string values
-- Convert currency columns to numeric — supports USD, EUR, GBP, INR, PKR, and other formats
-- Convert percentage strings like "15%" to decimal values like 0.15
-- Extract numeric values from unit strings like "70kg" or "154 lbs"
-- Convert duration strings like "1h30m" or "90min" to seconds
-- Handle missing values using KNN imputation for small datasets and MICE for large ones
-- Find and replace across any column with optional regex support
-- Force a column to a specific type — string, integer, float, datetime, boolean, or category
+- Convert currency columns to numeric supporting multiple formats
+- Convert percentage strings to decimal values
+- Extract numeric values from unit strings
+- Convert duration strings to seconds
+- Handle missing values using KNN or MICE
+- Find and replace with optional regex
+- Force a column to a specific type
 
 ---
 
 ## Validation Operations
 
-- Email validation — flag or remove rows with invalid email format
-- Phone standardization — strips all formatting and outputs +[country code][number]
-- Date standardization — parses 17 different date formats and outputs to one consistent format you choose
-- Outlier detection — IQR or Z-score, with cap or remove as the action
-- Range validation — flags or removes values outside a min/max you define
+- Email validation flag or remove invalid emails
+- Phone standardization to a consistent format
+- Date standardization across multiple formats
+- Outlier detection using IQR or Z score with cap or remove
+- Range validation with user defined limits
 
 ---
 
-## Multi-Sheet Excel Support
+## Multi Sheet Excel Support
 
-When you upload an Excel file with multiple sheets, the app shows a dropdown to pick which sheet to load. Switching sheets resets the cleaning state and loads the new sheet fresh.
+When uploading an Excel file with multiple sheets the app shows a selector to choose the sheet. Switching sheets resets the state and loads the selected sheet.
 
 ---
 
@@ -89,12 +105,13 @@ pandas
 numpy
 scikit-learn
 openpyxl
+reportlab
 ```
 
-Install with:
+Install with
 
 ```bash
-pip install streamlit pandas numpy scikit-learn openpyxl
+pip install streamlit pandas numpy scikit-learn openpyxl reportlab
 ```
 
 ### Run
@@ -103,21 +120,19 @@ pip install streamlit pandas numpy scikit-learn openpyxl
 streamlit run app.py
 ```
 
-Then upload any CSV or Excel file and start cleaning.
+Upload a CSV or Excel file and start cleaning.
 
 ---
 
 ## How Column Selection Works
 
-Every cleaning operation uses the same interaction pattern. You see the operation described in plain text. Next to it is a dropdown that opens a popup. Inside is an "Apply to all" checkbox at the top, followed by individual checkboxes for each affected column. The action button is disabled until at least one column is checked. The label updates to show how many columns are selected.
-
-This means you never accidentally apply a fix to columns you did not intend to touch.
+Each operation follows the same pattern. A description is shown with a dropdown selector. Inside the selector there is an apply to all option and individual column checkboxes. The action button activates only after selecting at least one column. The label updates to reflect the number of selected columns.
 
 ---
 
 ## Data Privacy
 
-Everything runs locally. No data is sent anywhere. Your files stay on your machine.
+Everything runs locally. No data is sent externally.
 
 ---
 
@@ -132,8 +147,6 @@ Everything runs locally. No data is sent anywhere. Your files stay on your machi
 
 Two test files are included in the repo.
 
-`test_data.csv` — a single CSV covering every error type the app handles. Mixed date formats, invalid emails, messy phone numbers, currency strings, percentages, unit values, duration strings, missing values, whitespace, and duplicate rows.
+test_data.csv: a single CSV covering every error type the app handles. Mixed date formats, invalid emails, messy phone numbers, currency strings, percentages, unit values, duration strings, missing values, whitespace, and duplicate rows.
 
-`test_multisheet.xlsx` — an Excel file with three sheets (Employees, Sales, Products), each with a different set of messy columns. Use this to test the sheet selector and verify that switching sheets loads the correct data.
-
-
+test_multisheet.xlsx: an Excel file with three sheets (Employees, Sales, Products), each with a different set of messy columns. Use this to test the sheet selector and verify that switching sheets loads the correct data.
