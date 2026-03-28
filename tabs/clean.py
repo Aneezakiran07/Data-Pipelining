@@ -484,3 +484,6 @@ def render(tab, cdf, all_cols, missing_threshold, numeric_strategy, conversion_t
 
         st.divider()
         _render_type_guesser(cdf)
+
+
+    
