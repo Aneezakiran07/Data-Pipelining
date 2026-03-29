@@ -16,7 +16,6 @@ from state import show_msg
 
 
 def _rec_col_popover(action_key, af_cols):
-    # Renders an inline column selection popover for a recommendation row.
     n_sel = len(st.session_state.selected_columns.get(action_key, []))
 
     def _rall(ak, cols):
@@ -43,7 +42,6 @@ def _rec_col_popover(action_key, af_cols):
 
 
 def _apply_fix(action_key, sel_cols, cdf, missing_threshold, numeric_strategy):
-    # Applies the selected fix to a copy of the dataframe and returns the result.
     tmp = cdf.copy()
 
     if action_key == "strip_whitespace":

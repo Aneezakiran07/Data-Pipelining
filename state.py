@@ -133,4 +133,3 @@ def col_popover(section, available_cols):
             st.checkbox(c, key=f"_vc_{section}_{c}", on_change=_make_col_handler(section, c))
     return n
 
-

@@ -1,6 +1,7 @@
 import pandas as pd
 import streamlit as st
 
+from ai_insights import render_summary
 from cache import get_quality_score
 
 
@@ -20,38 +21,26 @@ def _render_quality_score(cdf):
     result = get_quality_score(cdf)
     total = result["total"]
     breakdown = result["breakdown"]
-
     color = _score_color(total)
-
     label = "excellent" if total >= 80 else "needs work" if total >= 55 else "poor"
 
     gauge_html = f"""
     <div style="display:flex; align-items:center; gap:32px; margin-bottom:8px;">
         <div style="position:relative; width:130px; height:130px;">
             <svg viewBox="0 0 36 36" width="130" height="130">
-                <path d="M18 2.0845
-                    a 15.9155 15.9155 0 0 1 0 31.831
-                    a 15.9155 15.9155 0 0 1 0 -31.831"
-                    fill="none" stroke="#e5e7eb" stroke-width="3.5"
-                    stroke-dasharray="100, 100"/>
-                <path d="M18 2.0845
-                    a 15.9155 15.9155 0 0 1 0 31.831
-                    a 15.9155 15.9155 0 0 1 0 -31.831"
+                <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                    fill="none" stroke="#e5e7eb" stroke-width="3.5" stroke-dasharray="100, 100"/>
+                <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
                     fill="none" stroke="{color}" stroke-width="3.5"
-                    stroke-dasharray="{total}, 100"
-                    stroke-linecap="round"/>
-                <text x="18" y="17" text-anchor="middle"
-                    font-size="8" font-weight="bold" fill="{color}">{total}</text>
-                <text x="18" y="23" text-anchor="middle"
-                    font-size="3.2" fill="#888">/100</text>
+                    stroke-dasharray="{total}, 100" stroke-linecap="round"/>
+                <text x="18" y="17" text-anchor="middle" font-size="8" font-weight="bold" fill="{color}">{total}</text>
+                <text x="18" y="23" text-anchor="middle" font-size="3.2" fill="#888">/100</text>
             </svg>
         </div>
         <div>
             <div style="font-size:2rem; font-weight:800; color:{color};">{total}/100</div>
             <div style="font-size:1rem; color:#888; margin-top:2px;">quality score: {label}</div>
-            <div style="font-size:0.8rem; color:#aaa; margin-top:4px;">
-                updates live as you clean
-            </div>
+            <div style="font-size:0.8rem; color:#aaa; margin-top:4px;">updates live as you clean</div>
         </div>
     </div>
     """
@@ -62,24 +51,24 @@ def _render_quality_score(cdf):
         gc = _grade_color(data["grade"])
         with cols[i]:
             st.markdown(
-                f"""
-                <div style="background:#1a1a2e; border-radius:8px; padding:12px 10px;
+                f"""<div style="background:#1a1a2e; border-radius:8px; padding:12px 10px;
                             border-left:4px solid {gc}; min-height:110px;">
                     <div style="font-size:0.75rem; color:#aaa; margin-bottom:4px;">{dim}</div>
                     <div style="font-size:1.5rem; font-weight:700; color:{gc};">
                         {data['score']}<span style="font-size:0.8rem; color:#888;">/{data['max']}</span>
                     </div>
-                    <div style="font-size:0.7rem; color:#888; margin-top:6px; line-height:1.4;">
-                        {data['detail']}
-                    </div>
-                </div>
-                """,
+                    <div style="font-size:0.7rem; color:#888; margin-top:6px; line-height:1.4;">{data['detail']}</div>
+                </div>""",
                 unsafe_allow_html=True,
             )
 
 
-def render(tab, cdf, stats, orig_stats):
+def render(tab, cdf, stats, orig_stats, file_id=None):
     with tab:
+        if file_id:
+            render_summary(cdf, file_id)
+            st.divider()
+
         st.subheader("Data Quality Score")
         _render_quality_score(cdf)
 
@@ -120,4 +109,4 @@ def render(tab, cdf, stats, orig_stats):
             )
         st.caption("Download and reset options are in the History and Export tab.")
 
-
+        
