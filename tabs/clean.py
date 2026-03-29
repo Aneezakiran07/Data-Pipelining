@@ -15,6 +15,7 @@ from cleaning import (
     stripping_whitespace,
 )
 from cache import get_type_suggestions
+from nl_cleaner import render_nl_cleaner
 from pipeline import commit_history, snapshot
 
 
@@ -392,7 +393,6 @@ def _render_type_guesser(cdf):
 
     rows = []
     for s in suggestions:
-        key = f"tg_{s['column']}"
         checked = st.session_state.type_guesser_selected.get(s["column"], True)
         rows.append({
             "Apply": checked,
@@ -404,7 +404,6 @@ def _render_type_guesser(cdf):
             "Sample Values": s["sample"],
         })
 
-    import pandas as _pd
     display_df = pd.DataFrame(rows)
 
     edited = st.data_editor(
@@ -458,10 +457,23 @@ def _render_type_guesser(cdf):
         st.success(st.session_state.pop("_omsg")[1])
 
 
+def _render_ai_cleaner(cdf):
+    st.write("**AI Cleaner**")
+    st.caption(
+        "Describe what you want to do in plain English. Try to be as specific as possible.  "
+        "Gemini generates the code and shows it to you before running anything."
+    )
+    render_nl_cleaner(cdf)
+
+
 def render(tab, cdf, all_cols, missing_threshold, numeric_strategy, conversion_threshold):
     with tab:
         st.subheader("Manual Cleaning Operations")
 
+        with st.expander("AI Cleaner: describe what you want in plain English", expanded=False):
+            _render_ai_cleaner(cdf)
+
+        st.divider()
         _render_basic_cleaning(cdf)
 
         st.write("")
@@ -484,6 +496,3 @@ def render(tab, cdf, all_cols, missing_threshold, numeric_strategy, conversion_t
 
         st.divider()
         _render_type_guesser(cdf)
-
-
-    
