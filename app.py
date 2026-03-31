@@ -40,7 +40,7 @@ missing_threshold, numeric_strategy, conversion_threshold, mode = render_sidebar
     "  Clean  ",
     "  Validate  ",
     "  Profile  ",
-    "  History & Export  ",
+    "  History and Export  ",
     "  Guide  ",
 ])
 
@@ -64,7 +64,16 @@ else:
         load_key = f"{file_id}_{selected_sheet}"
         with st.spinner("Loading your file..."):
             df = load_file(file_bytes, uploaded.name, load_key, sheet_name=selected_sheet)
-            init_state(df, load_key)
+            # file_bytes and filename are passed so init_state can build a stable
+            # session key from filename plus size instead of file_id which changes on reload
+            init_state(df, load_key, file_bytes=file_bytes, filename=uploaded.name)
+            st.write("persist key in state:", st.session_state.get("_persist_key"))
+
+        # init_state calls st.stop() while the resume dialog is open
+        # so current_df will not exist yet in that render pass
+        # everything below is skipped until the user makes a choice and st.rerun fires
+        if "current_df" not in st.session_state:
+            st.stop()
 
         cdf = st.session_state.current_df
         df_key = st.session_state.get("current_df_key", make_df_key(cdf))
@@ -114,9 +123,9 @@ else:
         }
         history_export.render(tab_history, cdf, pipeline_settings)
 
-        # This means the page is fully visible before Gemini is called.
-        # On first load this triggers a rerun once insights are ready.
-        # On subsequent reruns the cache hit is instant and nothing blocks.
+        # this means the page is fully visible before Gemini is called
+        # on first load this triggers a rerun once insights are ready
+        # on subsequent reruns the cache hit is instant and nothing blocks
         ai_cache_key = f"ai_insights_{load_key}"
         if ai_cache_key not in st.session_state:
             from ai_insights import get_ai_insights

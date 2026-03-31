@@ -7,6 +7,32 @@ def snapshot():
     return st.session_state.current_df.copy()
 
 
+def _autosave():
+    """
+    Saves the current session to disk after every mutating operation.
+    Runs only when a persist key is set, which happens after init_state.
+    The save is called after the mutation is committed to session state
+    so the file on disk always reflects the latest state.
+    """
+    persist_key = st.session_state.get("_persist_key")
+    st.write(f"[autosave] persist_key: {persist_key}")
+    if not persist_key:
+        st.write("[autosave] no persist key, skipping")
+        return
+    try:
+        from session_persist import save_session
+        st.write("[autosave] calling save_session")
+        save_session(
+            stable_key=persist_key,
+            current_df=st.session_state.current_df,
+            history=st.session_state.get("history", []),
+            original_df=st.session_state.get("original_df", st.session_state.current_df),
+        )
+        st.write("[autosave] save_session returned")
+    except Exception as e:
+        st.write(f"[autosave] exception: {e}")
+
+
 def commit_history(label, snap):
     if "history" not in st.session_state:
         st.session_state.history = []
@@ -14,6 +40,7 @@ def commit_history(label, snap):
         st.session_state.history.pop(0)
     st.session_state.history.append({"label": label, "df": snap})
     st.session_state["history_len"] = st.session_state.get("history_len", 0) + 1
+    _autosave()
 
 
 def undo_last():
@@ -21,20 +48,17 @@ def undo_last():
         last = st.session_state.history.pop()
         st.session_state.current_df = last["df"]
         st.session_state["history_len"] = st.session_state.get("history_len", 0) + 1
+        _autosave()
         return last["label"]
     return None
 
 
 def export_pipeline_json(history):
-    # Saves only the step labels, not the dataframe snapshots.
-    # The result is a small portable file that describes the recipe, not the data.
     steps = [{"step": i + 1, "label": entry["label"]} for i, entry in enumerate(history)]
     return json.dumps({"version": 1, "steps": steps}, indent=2)
 
 
 def import_pipeline_json(json_bytes, df, settings):
-    # Replays a saved pipeline JSON against a fresh dataframe.
-    # Steps that need manual column selection are skipped and returned to the caller.
     from cleaning.basic import (
         clean_string_edges,
         drop_duplicate_columns,

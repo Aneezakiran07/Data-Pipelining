@@ -15,6 +15,14 @@ def _render_reset():
     st.subheader("Reset Data")
     st.warning("This will discard all cleaning and restore the original uploaded file.")
     if st.button("Reset to Original Data", key="reset_orig", use_container_width=True):
+        persist_key = st.session_state.get("_persist_key")
+        if persist_key:
+            try:
+                from session_persist import delete_session
+                delete_session(persist_key)
+            except Exception:
+                pass
+
         st.session_state.current_df = st.session_state.original_df.copy()
         st.session_state.selected_columns = {}
         st.session_state.history = []
@@ -79,6 +87,15 @@ def _render_history(hist):
         if st.button("Clear History", key="clear_hist", use_container_width=True):
             st.session_state.history = []
             st.session_state.last_success_msg = "History cleared."
+
+            persist_key = st.session_state.get("_persist_key")
+            if persist_key:
+                try:
+                    from session_persist import delete_session
+                    delete_session(persist_key)
+                except Exception:
+                    pass
+
             st.rerun()
 
 
@@ -121,8 +138,6 @@ def _render_pipeline_json(hist, settings):
             label_visibility="collapsed",
         )
 
-        # read bytes immediately into session state so the buffer is not
-        # exhausted by the time the button click triggers a second render pass
         if uploaded_json is not None:
             file_key = getattr(uploaded_json, "file_id", uploaded_json.name)
             if st.session_state.get("_json_file_key") != file_key:
@@ -225,7 +240,7 @@ def _render_report_pdf(cdf, hist, filename):
         )
 
 
-def render(tab, cdf, settings,df_key=""):
+def render(tab, cdf, settings, df_key=""):
     filename = settings.get("filename", "dataset")
     with tab:
         _render_reset()
@@ -239,5 +254,3 @@ def render(tab, cdf, settings,df_key=""):
         _render_pipeline_json(st.session_state.get("history", []), settings)
         st.divider()
         _render_python_export(st.session_state.get("history", []))
-
-        
