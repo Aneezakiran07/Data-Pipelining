@@ -15,22 +15,18 @@ def _autosave():
     so the file on disk always reflects the latest state.
     """
     persist_key = st.session_state.get("_persist_key")
-    st.write(f"[autosave] persist_key: {persist_key}")
     if not persist_key:
-        st.write("[autosave] no persist key, skipping")
         return
     try:
         from session_persist import save_session
-        st.write("[autosave] calling save_session")
         save_session(
             stable_key=persist_key,
             current_df=st.session_state.current_df,
             history=st.session_state.get("history", []),
             original_df=st.session_state.get("original_df", st.session_state.current_df),
         )
-        st.write("[autosave] save_session returned")
-    except Exception as e:
-        st.write(f"[autosave] exception: {e}")
+    except Exception:
+        pass
 
 
 def commit_history(label, snap):
@@ -242,3 +238,4 @@ def build_pipeline_script(history):
 
     lines.append("print('Pipeline complete. Shape:', df.shape)")
     return "\n".join(lines)
+
