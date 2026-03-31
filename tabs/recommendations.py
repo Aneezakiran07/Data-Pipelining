@@ -106,11 +106,11 @@ def _apply_fix(action_key, sel_cols, cdf, missing_threshold, numeric_strategy):
     return tmp
 
 
-def render(tab, cdf, conversion_threshold, missing_threshold, numeric_strategy):
+def render(tab, cdf, conversion_threshold, missing_threshold, numeric_strategy, df_key=""):
     with tab:
         show_msg()
         st.subheader("Smart Recommendations")
-        issues, recs = get_analysis_and_recommendations(cdf, conversion_threshold)
+        issues, recs = get_analysis_and_recommendations(df_key, cdf, conversion_threshold)
 
         if not recs:
             st.success("Your data looks clean. No issues detected.")

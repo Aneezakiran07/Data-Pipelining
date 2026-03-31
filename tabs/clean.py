@@ -280,7 +280,7 @@ def _render_merge_columns(cdf, all_cols):
         )
     with mg2:
         mg_sep = st.text_input("Separator", value=" ", key="mg_sep",
-                               help="The string placed between each column value. Use a single space, comma, or anything you like.")
+                               help="The string placed between each column value.")
 
     mg3, mg4 = st.columns([3, 1])
     with mg3:
@@ -375,14 +375,14 @@ def _render_rename_columns(cdf, all_cols):
         st.success(st.session_state.pop("_omsg")[1])
 
 
-def _render_type_guesser(cdf):
+def _render_type_guesser(cdf, df_key=""):
     st.write("**Data Type Guesser**")
     st.caption(
         "Scans every column and suggests the correct type based on what the values actually look like. "
         "Select the suggestions you want to apply then press Apply Selected."
     )
 
-    suggestions = get_type_suggestions(cdf)
+    suggestions = get_type_suggestions(df_key, cdf)
 
     if not suggestions:
         st.success("All columns already look like the right type. Nothing to suggest.")
@@ -466,7 +466,7 @@ def _render_ai_cleaner(cdf):
     render_nl_cleaner(cdf)
 
 
-def render(tab, cdf, all_cols, missing_threshold, numeric_strategy, conversion_threshold):
+def render(tab, cdf, all_cols, missing_threshold, numeric_strategy, conversion_threshold, df_key=""):
     with tab:
         st.subheader("Manual Cleaning Operations")
 
@@ -495,4 +495,4 @@ def render(tab, cdf, all_cols, missing_threshold, numeric_strategy, conversion_t
         _render_rename_columns(cdf, all_cols)
 
         st.divider()
-        _render_type_guesser(cdf)
+        _render_type_guesser(cdf, df_key)

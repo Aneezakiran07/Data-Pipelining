@@ -12,7 +12,6 @@ from state import show_msg
 
 
 def _render_histogram(col, data):
-    # Draws a histogram with a KDE overlay and IQR fence lines.
     if not data:
         st.caption("No numeric data to plot.")
         return
@@ -66,8 +65,7 @@ def _render_histogram(col, data):
         "encoding": {
             "x": {"field": "value", "type": "quantitative"},
             "color": {
-                "field": "label",
-                "type": "nominal",
+                "field": "label", "type": "nominal",
                 "scale": {
                     "domain": ["Mean", "Median", "IQR lower fence", "IQR upper fence"],
                     "range": ["#d62728", "#2ca02c", "#9467bd", "#9467bd"],
@@ -98,7 +96,6 @@ def _render_histogram(col, data):
 
 
 def _render_bar_chart(col, data):
-    # Draws a horizontal bar chart for categorical value counts.
     if not data:
         st.caption("No categorical data to plot.")
         return
@@ -114,11 +111,8 @@ def _render_bar_chart(col, data):
         "data": {"values": bar_df.to_dict("records")},
         "encoding": {
             "y": {
-                "field": "label",
-                "type": "nominal",
-                "sort": "-x",
-                "title": col,
-                "axis": {"labelLimit": 180},
+                "field": "label", "type": "nominal", "sort": "-x",
+                "title": col, "axis": {"labelLimit": 180},
             },
             "x": {"field": "count", "type": "quantitative", "title": "Count"},
             "tooltip": [
@@ -134,16 +128,12 @@ def _render_bar_chart(col, data):
     st.vega_lite_chart(chart, use_container_width=True)
 
     if data["shown"] < data["unique"]:
-        st.caption(
-            f"Showing top {data['shown']} of {data['unique']} unique values "
-            f"across {data['total']} non-null rows."
-        )
+        st.caption(f"Showing top {data['shown']} of {data['unique']} unique values across {data['total']} non-null rows.")
     else:
         st.caption(f"{data['unique']} unique values across {data['total']} non-null rows.")
 
 
 def _render_missing_heatmap(data):
-    # Draws a grid coloured by whether each cell is null or present.
     if not data:
         st.success("No missing values found in this dataset.")
         return
@@ -168,24 +158,14 @@ def _render_missing_heatmap(data):
         "data": {"values": rows_list},
         "encoding": {
             "x": {
-                "field": "row",
-                "type": "ordinal",
+                "field": "row", "type": "ordinal",
                 "title": f"Row index (sample of {n_rows_shown})",
                 "axis": {"labels": False, "ticks": False},
             },
-            "y": {
-                "field": "column",
-                "type": "nominal",
-                "title": "Column",
-                "sort": columns,
-            },
+            "y": {"field": "column", "type": "nominal", "title": "Column", "sort": columns},
             "color": {
-                "field": "status",
-                "type": "nominal",
-                "scale": {
-                    "domain": ["Present", "Missing"],
-                    "range": ["#1f77b4", "#d62728"],
-                },
+                "field": "status", "type": "nominal",
+                "scale": {"domain": ["Present", "Missing"], "range": ["#1f77b4", "#d62728"]},
                 "legend": {"title": "Value status"},
             },
             "tooltip": [
@@ -201,9 +181,7 @@ def _render_missing_heatmap(data):
     st.vega_lite_chart(chart, use_container_width=True)
 
     if total_rows > n_rows_shown:
-        st.caption(
-            f"Heatmap shows a random sample of {n_rows_shown} rows out of {total_rows} total."
-        )
+        st.caption(f"Heatmap shows a random sample of {n_rows_shown} rows out of {total_rows} total.")
 
     pct_items = sorted(null_pct.items(), key=lambda x: x[1], reverse=True)
     pct_cols = st.columns(min(len(pct_items), 4))
@@ -212,9 +190,6 @@ def _render_missing_heatmap(data):
 
 
 def _render_correlation_heatmap(data):
-    # Draws a symmetric correlation matrix as a colour-encoded rect heatmap.
-    # Blue shades are positive correlation, red shades are negative.
-    # The diagonal is always 1.0 and is shown in a neutral grey.
     if not data:
         st.caption("No correlation data to display.")
         return
@@ -227,26 +202,13 @@ def _render_correlation_heatmap(data):
         "data": {"values": data["rows"]},
         "encoding": {
             "x": {
-                "field": "col_a",
-                "type": "nominal",
-                "sort": col_order,
-                "title": None,
-                "axis": {"labelAngle": -40, "labelLimit": 120},
+                "field": "col_a", "type": "nominal", "sort": col_order,
+                "title": None, "axis": {"labelAngle": -40, "labelLimit": 120},
             },
-            "y": {
-                "field": "col_b",
-                "type": "nominal",
-                "sort": col_order,
-                "title": None,
-                "axis": {"labelLimit": 120},
-            },
+            "y": {"field": "col_b", "type": "nominal", "sort": col_order, "title": None, "axis": {"labelLimit": 120}},
             "color": {
-                "field": "value",
-                "type": "quantitative",
-                "scale": {
-                    "domain": [-1, 0, 1],
-                    "range": ["#d62728", "#f5f5f5", "#1f77b4"],
-                },
+                "field": "value", "type": "quantitative",
+                "scale": {"domain": [-1, 0, 1], "range": ["#d62728", "#f5f5f5", "#1f77b4"]},
                 "legend": {"title": "Correlation", "gradientLength": 120},
             },
             "tooltip": [
@@ -273,19 +235,9 @@ def _render_correlation_heatmap(data):
         },
     }
 
-    # only show text labels when the grid is small enough to be readable
-    if n_cols <= 12:
-        final_chart = {
-            "layer": [chart, text_layer],
-            "width": "container",
-            "height": max(200, 36 * n_cols),
-        }
-    else:
-        final_chart = chart
-
+    final_chart = {"layer": [chart, text_layer], "width": "container", "height": max(200, 36 * n_cols)} if n_cols <= 12 else chart
     st.vega_lite_chart(final_chart, use_container_width=True)
 
-    # surface the strongest off-diagonal pairs as a quick summary
     off_diag = [r for r in data["rows"] if r["col_a"] != r["col_b"]]
     if off_diag:
         seen = set()
@@ -295,14 +247,11 @@ def _render_correlation_heatmap(data):
             if pair not in seen:
                 seen.add(pair)
                 unique_pairs.append(r)
-
         top = unique_pairs[:3]
         if top:
             st.caption(
-                "Strongest pairs: "
-                + "   |   ".join(
-                    f"{r['col_a']} vs {r['col_b']} ({r['value']:+.2f})"
-                    for r in top
+                "Strongest pairs: " + "   |   ".join(
+                    f"{r['col_a']} vs {r['col_b']} ({r['value']:+.2f})" for r in top
                 )
             )
 
@@ -311,10 +260,12 @@ def render(tab, cdf, mode="Simple"):
     with tab:
         show_msg()
 
+        df_key = st.session_state.get("current_df_key", "")
+
+        # Column profiler,always shown, lightweight
         st.subheader("Column Profiler")
         st.caption("Per-column stats including min, max, mean, median, std, skewness, and sample values.")
-
-        profile = get_column_profile(cdf)
+        profile = get_column_profile(df_key, cdf)
         st.dataframe(profile, use_container_width=True, hide_index=True)
 
         worst = profile[profile["Null"] > 0].sort_values("Null", ascending=False)
@@ -326,10 +277,11 @@ def render(tab, cdf, mode="Simple"):
 
         st.divider()
 
+        # Distribution chartsonly computes the selected column, not all
         st.subheader("Distribution Charts")
         st.caption(
             "Select a column to see its distribution. "
-            "Numeric columns show a histogram with a KDE curve and IQR outlier fences. "
+            "Numeric columns show a histogram with KDE and IQR fences. "
             "Categorical columns show a value frequency bar chart."
         )
 
@@ -341,82 +293,78 @@ def render(tab, cdf, mode="Simple"):
 
         if dist_col in num_cols:
             n_bins = st.slider("Number of bins", 5, 100, 30, key="hist_bins")
-            hist_data = get_histogram_data(cdf[dist_col], n_bins=n_bins)
+            hist_data = get_histogram_data(df_key, cdf[dist_col], n_bins=n_bins)
             _render_histogram(dist_col, hist_data)
         elif dist_col in cat_cols:
             top_n = st.slider("Max categories to show", 5, 50, 20, key="bar_topn")
-            bar_data = get_bar_data(cdf[dist_col], top_n=top_n)
+            bar_data = get_bar_data(df_key, cdf[dist_col], top_n=top_n)
             _render_bar_chart(dist_col, bar_data)
         else:
             st.caption(f"Column type {cdf[dist_col].dtype} is not supported for distribution plots.")
 
         st.divider()
 
-        st.subheader("Missing Value Heatmap")
-        st.caption(
-            "Each row is a data row and each column strip is a dataset column. "
-            "Red cells are missing values. Only columns with at least one missing value are shown."
-        )
-
-        heatmap_data = get_missing_heatmap_data(cdf)
-        _render_missing_heatmap(heatmap_data)
+        with st.expander("Missing Value Heatmap", expanded=False):
+            st.caption(
+                "Red cells are missing values. "
+                "Only columns with at least one missing value are shown."
+            )
+            heatmap_data = get_missing_heatmap_data(df_key, cdf)
+            _render_missing_heatmap(heatmap_data)
 
         st.divider()
 
-        st.subheader("Correlation Heatmap")
-        if mode != "Advanced":
-            st.caption("Switch to Advanced mode in the sidebar to unlock the correlation heatmap.")
-        else:
-            st.caption(
-                "Shows how strongly each pair of numeric columns moves together. "
-                "Values close to 1 or -1 are strongly correlated. "
-                "Values near 0 have little linear relationship. "
-                "Pairs near 1.0 may be redundant columns worth dropping."
-            )
-            num_cols_for_corr = list(cdf.select_dtypes(include="number").columns)
-            if len(num_cols_for_corr) < 2:
-                st.caption("Need at least two numeric columns to compute correlations.")
+        with st.expander("Correlation Heatmap", expanded=False):
+            if mode != "Advanced":
+                st.caption("Switch to Advanced mode in the sidebar to unlock the correlation heatmap.")
             else:
-                corr_method = st.selectbox(
-                    "Method",
-                    ["pearson", "spearman", "kendall"],
-                    key="corr_method",
-                    help=(
-                        "Pearson measures linear relationships and is the standard choice. "
-                        "Spearman is rank-based and handles non-linear relationships and outliers better. "
-                        "Kendall is also rank-based and more robust on small datasets."
-                    ),
+                st.caption(
+                    "Shows how strongly each pair of numeric columns moves together. "
+                    "Values close to 1 or -1 are strongly correlated. "
+                    "Pairs near 1.0 may be redundant columns worth dropping."
                 )
-                corr_data = get_correlation_data(cdf, method=corr_method)
-                _render_correlation_heatmap(corr_data)
+                num_cols_for_corr = list(cdf.select_dtypes(include="number").columns)
+                if len(num_cols_for_corr) < 2:
+                    st.caption("Need at least two numeric columns to compute correlations.")
+                else:
+                    corr_method = st.selectbox(
+                        "Method", ["pearson", "spearman", "kendall"], key="corr_method",
+                        help="Pearson is standard. Spearman handles outliers better. Kendall is robust on small datasets.",
+                    )
+                    corr_data = get_correlation_data(df_key, cdf, method=corr_method)
+                    _render_correlation_heatmap(corr_data)
 
         st.divider()
 
-        st.subheader("Before and After Comparison")
-        original_df = st.session_state.original_df
-        shared = [c for c in original_df.columns if c in cdf.columns]
+        # Before/after comparison 
+        with st.expander("Before and After Comparison", expanded=False):
+            original_df = st.session_state.original_df
+            shared = [c for c in original_df.columns if c in cdf.columns]
 
-        if shared:
-            ba_col = st.selectbox("Select column to compare", shared, key="ba_col")
-            ba_n = st.slider("Rows to preview", 5, 50, 10, key="ba_n")
+            if shared:
+                ba_col = st.selectbox("Select column to compare", shared, key="ba_col")
+                ba_n = st.slider("Rows to preview", 5, 50, 10, key="ba_n")
 
-            orig_s = original_df[ba_col].head(ba_n).reset_index(drop=True)
-            curr_s = cdf[ba_col].head(ba_n).reset_index(drop=True)
-            ml = min(len(orig_s), len(curr_s))
-            orig_s, curr_s = orig_s.iloc[:ml], curr_s.iloc[:ml]
-            changed = orig_s.fillna("").astype(str) != curr_s.fillna("").astype(str)
+                orig_s = original_df[ba_col].head(ba_n).reset_index(drop=True)
+                curr_s = cdf[ba_col].head(ba_n).reset_index(drop=True)
+                ml = min(len(orig_s), len(curr_s))
+                orig_s, curr_s = orig_s.iloc[:ml], curr_s.iloc[:ml]
+                changed = orig_s.fillna("").astype(str) != curr_s.fillna("").astype(str)
 
-            st.dataframe(
-                pd.DataFrame({
-                    "Original": orig_s,
-                    "Current": curr_s,
-                    "Changed": changed.map({True: "yes", False: ""}),
-                }),
-                use_container_width=True,
-            )
-            n_ch = int(changed.sum())
-            st.caption(
-                f"{n_ch} row(s) changed in this preview window."
-                if n_ch
-                else "No differences found in this preview window."
-            )
+                st.dataframe(
+                    pd.DataFrame({
+                        "Original": orig_s,
+                        "Current": curr_s,
+                        "Changed": changed.map({True: "yes", False: ""}),
+                    }),
+                    use_container_width=True,
+                )
+                n_ch = int(changed.sum())
+                st.caption(
+                    f"{n_ch} row(s) changed in this preview window."
+                    if n_ch else "No differences found in this preview window."
+                )
+
+
+
+            

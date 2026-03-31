@@ -5,7 +5,7 @@ from pipeline import commit_history, snapshot
 from state import col_popover
 
 
-def render(tab, cdf, text_cols, num_cols):
+def render(tab, cdf, text_cols, num_cols,df_key=""):
     with tab:
         st.subheader("Validation and Quality")
 

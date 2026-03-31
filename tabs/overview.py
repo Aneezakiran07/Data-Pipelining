@@ -17,8 +17,8 @@ def _grade_color(grade):
     return {"good": "#16a34a", "fair": "#d97706", "poor": "#dc2626"}.get(grade, "#888888")
 
 
-def _render_quality_score(cdf):
-    result = get_quality_score(cdf)
+def _render_quality_score(cdf, df_key):
+    result = get_quality_score(df_key, cdf)
     total = result["total"]
     breakdown = result["breakdown"]
     color = _score_color(total)
@@ -63,14 +63,14 @@ def _render_quality_score(cdf):
             )
 
 
-def render(tab, cdf, stats, orig_stats, file_id=None):
+def render(tab, cdf, stats, orig_stats, file_id=None, df_key=""):
     with tab:
         if file_id:
             render_summary(cdf, file_id)
             st.divider()
 
         st.subheader("Data Quality Score")
-        _render_quality_score(cdf)
+        _render_quality_score(cdf, df_key)
 
         st.divider()
         st.subheader("Data Statistics")

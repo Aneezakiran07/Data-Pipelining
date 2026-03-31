@@ -144,6 +144,11 @@ def _call_gemini(df):
 
 
 def get_ai_insights(df, file_id):
+    """
+    Fetches AI insights for the given dataframe.
+    Caches result in session state so subsequent calls are instant.
+    Always triggers the Gemini API call if not cached.
+    """
     cache_key = f"ai_insights_{file_id}"
     if cache_key in st.session_state:
         return st.session_state[cache_key], None
@@ -155,16 +160,16 @@ def get_ai_insights(df, file_id):
 
 
 def render_summary(df, file_id):
-    api_key = _get_api_key()
-    if not api_key:
-        return
-    already_cached = f"ai_insights_{file_id}" in st.session_state
-    if not already_cached:
-        with st.spinner("AI is reading your data..."):
-            insights, err = get_ai_insights(df, file_id)
-    else:
-        insights, err = get_ai_insights(df, file_id)
-    if err or not insights:
+    """
+    Renders the AI summary in the Overview tab.
+    NEVER triggers the API call — only reads from cache.
+    The actual API call is made in app.py after all tabs render.
+    """
+    cache_key = f"ai_insights_{file_id}"
+    insights = st.session_state.get(cache_key)
+    if not insights:
+        # still loading,show a subtle placeholder, not a spinner
+        st.caption("AI summary loading...")
         return
     summary = insights.get("summary", "")
     if summary:

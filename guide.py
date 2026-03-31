@@ -89,18 +89,12 @@ def _render_ai_section(cdf, file_id):
     st.markdown("## AI Analysis")
     st.caption("AI has read your specific data and tells you exactly what to fix and how.")
 
-    already_cached = f"ai_insights_{file_id}" in st.session_state
-    if not already_cached:
-        with st.spinner("AI is reading your data..."):
-            insights, err = get_ai_insights(cdf, file_id)
-    else:
-        insights, err = get_ai_insights(cdf, file_id)
-
-    if err:
-        st.warning(f"AI analysis unavailable: {err}")
-        return
+    # never trigger the API call here — app.py handles that after all tabs render
+    cache_key = f"ai_insights_{file_id}"
+    insights = st.session_state.get(cache_key)
 
     if not insights:
+        st.caption("AI analysis loading...")
         return
 
     summary = insights.get("summary", "")

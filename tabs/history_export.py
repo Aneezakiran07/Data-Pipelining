@@ -225,7 +225,7 @@ def _render_report_pdf(cdf, hist, filename):
         )
 
 
-def render(tab, cdf, settings):
+def render(tab, cdf, settings,df_key=""):
     filename = settings.get("filename", "dataset")
     with tab:
         _render_reset()

@@ -4,6 +4,24 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
+#fingerpoint he;per
+
+def make_df_key(df: pd.DataFrame) -> str:
+    """
+    Cheap string fingerprint for a dataframe.
+    Used as the cache key instead of passing the full df,
+    so st.cache_data never has to hash thousands of cells.
+    Shape + dtype signature + hash of first & last 5 rows covers
+    virtually all cases where the df has actually changed.
+    """
+    shape_part = f"{df.shape[0]}x{df.shape[1]}"
+    dtype_part = "|".join(f"{c}:{t}" for c, t in zip(df.columns, df.dtypes))
+    n = min(5, len(df))
+    sample = pd.concat([df.head(n), df.tail(n)]) if len(df) > n else df
+    sample_hash = str(pd.util.hash_pandas_object(sample).sum())
+    return f"{shape_part}__{sample_hash}__{hash(dtype_part)}"
+
+# File loading
 
 @st.cache_data(show_spinner=False)
 def load_file(file_bytes, filename, file_id, sheet_name=None):
@@ -14,8 +32,13 @@ def load_file(file_bytes, filename, file_id, sheet_name=None):
     return pd.read_excel(buf, sheet_name=sheet_name)
 
 
+# Cached analysis functions,all keyed on df_key (cheap string),
+# df itself is passed separately and NOT used as a cache key discriminator.
+# st.cache_data hashes ALL args, so we pass df last and rely on df_key
+# being unique enough to bust the cache correctly.
+
 @st.cache_data(show_spinner=False)
-def get_dataframe_stats(df):
+def get_dataframe_stats(df_key: str, df: pd.DataFrame):
     return {
         "rows": df.shape[0],
         "columns": df.shape[1],
@@ -28,7 +51,7 @@ def get_dataframe_stats(df):
 
 
 @st.cache_data(show_spinner=False)
-def get_column_profile(df):
+def get_column_profile(df_key: str, df: pd.DataFrame):
     rows = []
     for col in df.columns:
         s = df[col]
@@ -64,7 +87,7 @@ def get_column_profile(df):
 
 
 @st.cache_data(show_spinner=False)
-def get_analysis_and_recommendations(df, conversion_threshold):
+def get_analysis_and_recommendations(df_key: str, df: pd.DataFrame, conversion_threshold: float):
     issues = {
         "duplicate_rows": int(df.duplicated().sum()),
         "duplicate_cols": max(
@@ -133,8 +156,7 @@ def get_analysis_and_recommendations(df, conversion_threshold):
 
 
 @st.cache_data(show_spinner=False)
-def get_histogram_data(series, n_bins=30):
-    # Returns bin counts, KDE points, and IQR fence values for a numeric column.
+def get_histogram_data(df_key: str, series: pd.Series, n_bins: int = 30):
     clean = series.dropna()
     if clean.empty:
         return {}
@@ -173,8 +195,7 @@ def get_histogram_data(series, n_bins=30):
 
 
 @st.cache_data(show_spinner=False)
-def get_bar_data(series, top_n=20):
-    # Returns value counts for a categorical column capped at top_n.
+def get_bar_data(df_key: str, series: pd.Series, top_n: int = 20):
     clean = series.dropna()
     if clean.empty:
         return {}
@@ -191,8 +212,7 @@ def get_bar_data(series, top_n=20):
 
 
 @st.cache_data(show_spinner=False)
-def get_missing_heatmap_data(df):
-    # Returns a row-sampled null matrix. Capped at 300 rows so the chart stays readable.
+def get_missing_heatmap_data(df_key: str, df: pd.DataFrame):
     max_rows = 300
     sample = df.sample(max_rows, random_state=0) if len(df) > max_rows else df
     cols_with_nulls = [c for c in sample.columns if sample[c].isna().any()]
@@ -209,16 +229,12 @@ def get_missing_heatmap_data(df):
 
 
 @st.cache_data(show_spinner=False)
-def get_correlation_data(df, method="pearson"):
-    # Computes a correlation matrix for all numeric columns.
-    # Returns melted long-form rows that Vega-Lite needs for a rect heatmap,
-    # plus the ordered column list so both axes stay consistent.
+def get_correlation_data(df_key: str, df: pd.DataFrame, method: str = "pearson"):
     num_cols = df.select_dtypes(include="number").columns.tolist()
     if len(num_cols) < 2:
         return {}
 
     corr = df[num_cols].corr(method=method).round(3)
-
     rows = []
     for col_a in num_cols:
         for col_b in num_cols:
@@ -238,15 +254,11 @@ def get_correlation_data(df, method="pearson"):
 
 
 @st.cache_data(show_spinner=False)
-def get_type_suggestions(df):
-    # Analyses every column and returns a suggested action with a confidence score.
-    # Only columns where the current type is wrong or suboptimal get a suggestion.
-    # Returns a list of dicts, one per actionable column.
+def get_type_suggestions(df_key: str, df: pd.DataFrame):
     import re
 
     email_pattern = r"^[\w\.\+\-]+@[\w\-]+\.[a-zA-Z]{2,}$"
     currency_pattern = r'[$€£¥₹₽₺₩฿]|(USD|EUR|GBP|JPY|CNY|INR|PKR|Rs\.?)'
-    url_pattern = r"^https?://"
     bool_values = {"true", "false", "yes", "no", "1", "0", "y", "n"}
 
     suggestions = []
@@ -254,162 +266,131 @@ def get_type_suggestions(df):
     for col in df.columns:
         s = df[col]
         current_type = str(s.dtype)
-        total = len(s)
         non_null = s.dropna()
         n = len(non_null)
 
         if n == 0:
             continue
 
-        # already numeric, check if it could be boolean
         if pd.api.types.is_numeric_dtype(s):
             unique_vals = set(s.dropna().unique())
             if unique_vals <= {0, 1, 0.0, 1.0}:
                 suggestions.append({
-                    "column": col,
-                    "current_type": current_type,
-                    "suggested_action": "convert_to_boolean",
-                    "suggested_label": "Boolean",
-                    "reason": "Only contains 0 and 1 values",
-                    "confidence": 99,
+                    "column": col, "current_type": current_type,
+                    "suggested_action": "convert_to_boolean", "suggested_label": "Boolean",
+                    "reason": "Only contains 0 and 1 values", "confidence": 99,
                     "sample": ", ".join(str(v) for v in list(unique_vals)[:4]),
                 })
             continue
 
         str_series = non_null.astype(str).str.strip()
 
-        # email detection
         email_match = str_series.str.match(email_pattern).mean()
         if email_match >= 0.7:
             suggestions.append({
-                "column": col,
-                "current_type": current_type,
-                "suggested_action": "validate_email",
-                "suggested_label": "Email",
+                "column": col, "current_type": current_type,
+                "suggested_action": "validate_email", "suggested_label": "Email",
                 "reason": f"{email_match*100:.0f}% of values look like email addresses",
                 "confidence": round(email_match * 100),
                 "sample": ", ".join(str_series.head(3).tolist()),
             })
             continue
 
-        # boolean detection
         lower = str_series.str.lower()
         bool_match = lower.isin(bool_values).mean()
         if bool_match >= 0.7:
             suggestions.append({
-                "column": col,
-                "current_type": current_type,
-                "suggested_action": "convert_to_boolean",
-                "suggested_label": "Boolean",
+                "column": col, "current_type": current_type,
+                "suggested_action": "convert_to_boolean", "suggested_label": "Boolean",
                 "reason": f"{bool_match*100:.0f}% of values are true/false/yes/no",
                 "confidence": round(bool_match * 100),
                 "sample": ", ".join(str_series.head(3).tolist()),
             })
             continue
 
-        # currency detection
         currency_like = (
             str_series.str.contains(r"\d", regex=True)
             & str_series.str.contains(currency_pattern, case=False, regex=True)
         )
         if currency_like.mean() >= 0.6:
             suggestions.append({
-                "column": col,
-                "current_type": current_type,
-                "suggested_action": "convert_currency",
-                "suggested_label": "Numeric (currency)",
+                "column": col, "current_type": current_type,
+                "suggested_action": "convert_currency", "suggested_label": "Numeric (currency)",
                 "reason": f"{currency_like.mean()*100:.0f}% of values look like currency amounts",
                 "confidence": round(currency_like.mean() * 100),
                 "sample": ", ".join(str_series.head(3).tolist()),
             })
             continue
 
-        # percentage detection
         pct_match = str_series.str.contains("%").mean()
         if pct_match >= 0.6:
             suggestions.append({
-                "column": col,
-                "current_type": current_type,
-                "suggested_action": "convert_percentage",
-                "suggested_label": "Numeric (percentage)",
+                "column": col, "current_type": current_type,
+                "suggested_action": "convert_percentage", "suggested_label": "Numeric (percentage)",
                 "reason": f"{pct_match*100:.0f}% of values contain a % symbol",
                 "confidence": round(pct_match * 100),
                 "sample": ", ".join(str_series.head(3).tolist()),
             })
             continue
 
-        # unit measurement detection
         unit_match = str_series.str.contains(
             r"\d+\s?(kg|g|mg|cm|mm|km|ml|l|lb|lbs|oz|kgs)", case=False, regex=True
         ).mean()
         if unit_match >= 0.6:
             suggestions.append({
-                "column": col,
-                "current_type": current_type,
-                "suggested_action": "convert_units",
-                "suggested_label": "Numeric (measurement)",
+                "column": col, "current_type": current_type,
+                "suggested_action": "convert_units", "suggested_label": "Numeric (measurement)",
                 "reason": f"{unit_match*100:.0f}% of values contain a measurement unit",
                 "confidence": round(unit_match * 100),
                 "sample": ", ".join(str_series.head(3).tolist()),
             })
             continue
 
-        # duration detection
         duration_match = str_series.str.contains(
             r"(h|hr|hour|min|minute|sec|second)", case=False, regex=True
         ).mean()
         if duration_match >= 0.6:
             suggestions.append({
-                "column": col,
-                "current_type": current_type,
-                "suggested_action": "convert_duration",
-                "suggested_label": "Numeric (duration in seconds)",
+                "column": col, "current_type": current_type,
+                "suggested_action": "convert_duration", "suggested_label": "Numeric (duration in seconds)",
                 "reason": f"{duration_match*100:.0f}% of values look like time durations",
                 "confidence": round(duration_match * 100),
                 "sample": ", ".join(str_series.head(3).tolist()),
             })
             continue
 
-        # datetime detection
+        # only sample 20 rows for datetime — pd.to_datetime is slow
         date_sample = str_series.head(20)
         parsed = pd.to_datetime(date_sample, errors="coerce", infer_datetime_format=True)
         date_match = parsed.notna().mean()
         if date_match >= 0.6:
             suggestions.append({
-                "column": col,
-                "current_type": current_type,
-                "suggested_action": "convert_datetime",
-                "suggested_label": "Datetime",
+                "column": col, "current_type": current_type,
+                "suggested_action": "convert_datetime", "suggested_label": "Datetime",
                 "reason": f"{date_match*100:.0f}% of sampled values parse as dates",
                 "confidence": round(date_match * 100),
                 "sample": ", ".join(str_series.head(3).tolist()),
             })
             continue
 
-        # plain numeric string detection
         cleaned = str_series.str.replace(r"[^\d.\-]", "", regex=True).replace("", np.nan)
         numeric_match = pd.to_numeric(cleaned, errors="coerce").notna().mean()
         if numeric_match >= 0.7:
             suggestions.append({
-                "column": col,
-                "current_type": current_type,
-                "suggested_action": "convert_numeric",
-                "suggested_label": "Numeric",
+                "column": col, "current_type": current_type,
+                "suggested_action": "convert_numeric", "suggested_label": "Numeric",
                 "reason": f"{numeric_match*100:.0f}% of values are numeric strings",
                 "confidence": round(numeric_match * 100),
                 "sample": ", ".join(str_series.head(3).tolist()),
             })
             continue
 
-        # low cardinality category detection
         unique_ratio = s.nunique() / n
         if unique_ratio <= 0.05 and s.nunique() <= 50:
             suggestions.append({
-                "column": col,
-                "current_type": current_type,
-                "suggested_action": "convert_category",
-                "suggested_label": "Category",
-                "reason": f"Only {s.nunique()} unique values across {n} rows ({unique_ratio*100:.1f}% unique), storing as category saves memory",
+                "column": col, "current_type": current_type,
+                "suggested_action": "convert_category", "suggested_label": "Category",
+                "reason": f"Only {s.nunique()} unique values ({unique_ratio*100:.1f}% unique), storing as category saves memory",
                 "confidence": round((1 - unique_ratio) * 100),
                 "sample": ", ".join(str(v) for v in s.value_counts().head(3).index.tolist()),
             })
@@ -418,12 +399,7 @@ def get_type_suggestions(df):
 
 
 @st.cache_data(show_spinner=False)
-def get_quality_score(df):
-    # computes a data quality score from 0 to 100 across five dimensions.
-    # each dimension contributes 20 points. the score updates live as the
-    # user cleans because cache busts whenever the dataframe changes.
-    # returns the total score and a breakdown dict for rendering.
-
+def get_quality_score(df_key: str, df: pd.DataFrame):
     total_cells = df.shape[0] * df.shape[1]
     if total_cells == 0:
         return {"total": 0, "breakdown": {}}
@@ -431,26 +407,17 @@ def get_quality_score(df):
     n_rows = len(df)
     n_cols = df.shape[1]
 
-    # dimension 1: completeness (missing values)
-    # 20 points. deducted proportionally to the fraction of missing cells.
     missing_frac = df.isna().sum().sum() / total_cells
     completeness_score = round(20 * (1 - missing_frac))
 
-    # dimension 2: uniqueness (duplicate rows)
-    # 20 points. deducted proportionally to the fraction of duplicate rows.
     dup_frac = df.duplicated().sum() / max(n_rows, 1)
     uniqueness_score = round(20 * (1 - dup_frac))
 
-    # dimension 3: type consistency
-    # 20 points. one point deducted per column where more than 20% of values
-    # look like a different type than the column currently stores.
-    # checks string columns for numeric content and object columns storing numbers.
     inconsistent_cols = 0
     for col in df.select_dtypes(include="object").columns:
         s = df[col].dropna().astype(str).str.strip()
         if len(s) == 0:
             continue
-        # if most values are numeric but column is object, that is inconsistent
         numeric_frac = pd.to_numeric(
             s.str.replace(r"[^\d.\-]", "", regex=True).replace("", np.nan),
             errors="coerce"
@@ -459,10 +426,6 @@ def get_quality_score(df):
             inconsistent_cols += 1
     type_score = round(max(0, 20 - (inconsistent_cols / max(n_cols, 1)) * 20))
 
-    # dimension 4: outlier cleanliness
-    # 20 points. deducted proportionally to the fraction of numeric values
-    # that sit outside 3x IQR fences. using 3x instead of 1.5x to only
-    # flag extreme outliers that are likely errors rather than natural spread.
     num_cols = df.select_dtypes(include=np.number).columns
     outlier_fracs = []
     for col in num_cols:
@@ -478,9 +441,6 @@ def get_quality_score(df):
     avg_outlier_frac = float(np.mean(outlier_fracs)) if outlier_fracs else 0.0
     outlier_score = round(max(0, 20 * (1 - avg_outlier_frac * 5)))
 
-    # dimension 5: validity (format correctness)
-    # 20 points. checks string columns for common invalid patterns:
-    # placeholder text like None, NA, unknown, n/a, null, ?, empty strings.
     invalid_pattern = r"^(none|na|n/a|null|unknown|\?|nan|-|)$"
     invalid_fracs = []
     for col in df.select_dtypes(include="object").columns:
@@ -505,33 +465,23 @@ def get_quality_score(df):
         "total": total,
         "breakdown": {
             "Completeness": {
-                "score": completeness_score,
-                "max": 20,
-                "grade": grade(completeness_score),
+                "score": completeness_score, "max": 20, "grade": grade(completeness_score),
                 "detail": f"{int(missing_frac * total_cells)} missing cells ({missing_frac*100:.1f}%)",
             },
             "Uniqueness": {
-                "score": uniqueness_score,
-                "max": 20,
-                "grade": grade(uniqueness_score),
+                "score": uniqueness_score, "max": 20, "grade": grade(uniqueness_score),
                 "detail": f"{int(dup_frac * n_rows)} duplicate rows ({dup_frac*100:.1f}%)",
             },
             "Type Consistency": {
-                "score": type_score,
-                "max": 20,
-                "grade": grade(type_score),
+                "score": type_score, "max": 20, "grade": grade(type_score),
                 "detail": f"{inconsistent_cols} column(s) storing numbers as text",
             },
             "Outlier Cleanliness": {
-                "score": outlier_score,
-                "max": 20,
-                "grade": grade(outlier_score),
+                "score": outlier_score, "max": 20, "grade": grade(outlier_score),
                 "detail": f"{avg_outlier_frac*100:.1f}% of numeric values are extreme outliers",
             },
             "Validity": {
-                "score": validity_score,
-                "max": 20,
-                "grade": grade(validity_score),
+                "score": validity_score, "max": 20, "grade": grade(validity_score),
                 "detail": f"{avg_invalid_frac*100:.1f}% of text values are placeholder or invalid strings",
             },
         },
