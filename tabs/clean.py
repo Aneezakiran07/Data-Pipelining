@@ -19,6 +19,57 @@ from nl_cleaner import render_nl_cleaner
 from pipeline import commit_history, snapshot
 
 
+def _count_whitespace_changes(before_df, after_df):
+    """
+    Counts how many individual cell values changed after whitespace stripping.
+    Only checks object columns since numeric columns are not affected.
+    """
+    total = 0
+    cols_changed = 0
+    for col in before_df.select_dtypes(include="object").columns:
+        if col not in after_df.columns:
+            continue
+        changed = (
+            before_df[col].fillna("").astype(str).str.strip()
+            != before_df[col].fillna("").astype(str)
+        )
+        n = int(changed.sum())
+        if n > 0:
+            total += n
+            cols_changed += 1
+    return total, cols_changed
+
+
+def _count_converted_cols(before_df, after_df):
+    """
+    Counts how many columns changed dtype after smart column cleaner.
+    """
+    changed = []
+    for col in before_df.columns:
+        if col in after_df.columns:
+            if str(before_df[col].dtype) != str(after_df[col].dtype):
+                changed.append(col)
+    return changed
+
+
+def _count_filled_missing(before_df, after_df):
+    """
+    Counts how many missing values were filled and in how many columns.
+    """
+    total_filled = 0
+    cols_filled = 0
+    for col in before_df.columns:
+        if col not in after_df.columns:
+            continue
+        before_null = int(before_df[col].isna().sum())
+        after_null = int(after_df[col].isna().sum())
+        filled = before_null - after_null
+        if filled > 0:
+            total_filled += filled
+            cols_filled += 1
+    return total_filled, cols_filled
+
+
 def _render_basic_cleaning(cdf):
     st.write("**Basic Cleaning**")
     c1, c2, c3, c4 = st.columns(4)
@@ -28,9 +79,17 @@ def _render_basic_cleaning(cdf):
                      help="Removes leading and trailing spaces from all text columns."):
             try:
                 _snap = snapshot()
-                st.session_state.current_df = stripping_whitespace(cdf)
+                n_rows = len(cdf)
+                with st.spinner(f"Stripping whitespace across {n_rows:,} rows..."):
+                    result = stripping_whitespace(cdf)
+                total_changed, cols_changed = _count_whitespace_changes(cdf, result)
+                st.session_state.current_df = result
                 commit_history("Strip Whitespace", _snap)
-                st.session_state["_omsg"] = ("ws_btn", "Whitespace stripped.")
+                if total_changed > 0:
+                    msg = f"Stripped whitespace from {cols_changed} column(s), {total_changed:,} values cleaned."
+                else:
+                    msg = "No whitespace found. Data already clean."
+                st.session_state["_omsg"] = ("ws_btn", msg)
                 st.rerun()
             except Exception as e:
                 st.error(str(e))
@@ -43,10 +102,17 @@ def _render_basic_cleaning(cdf):
             try:
                 _snap = snapshot()
                 before = len(cdf)
-                st.session_state.current_df = drop_duplicate_rows(cdf)
+                with st.spinner(f"Scanning {before:,} rows for duplicates..."):
+                    result = drop_duplicate_rows(cdf)
+                dropped = before - len(result)
+                st.session_state.current_df = result
                 commit_history("Drop Duplicate Rows", _snap)
-                dropped = before - len(st.session_state.current_df)
-                st.session_state["_omsg"] = ("ddr_btn", f"Dropped {dropped} duplicate rows.")
+                if dropped > 0:
+                    pct = dropped / before * 100
+                    msg = f"Dropped {dropped:,} duplicate rows ({pct:.1f}% of data). {len(result):,} rows remain."
+                else:
+                    msg = "No duplicate rows found."
+                st.session_state["_omsg"] = ("ddr_btn", msg)
                 st.rerun()
             except Exception as e:
                 st.error(str(e))
@@ -59,10 +125,16 @@ def _render_basic_cleaning(cdf):
             try:
                 _snap = snapshot()
                 before = cdf.shape[1]
-                st.session_state.current_df = drop_duplicate_columns(cdf)
+                with st.spinner("Scanning for duplicate columns..."):
+                    result = drop_duplicate_columns(cdf)
+                dropped = before - result.shape[1]
+                st.session_state.current_df = result
                 commit_history("Drop Duplicate Columns", _snap)
-                dropped = before - st.session_state.current_df.shape[1]
-                st.session_state["_omsg"] = ("ddc_btn", f"Dropped {dropped} duplicate columns.")
+                if dropped > 0:
+                    msg = f"Dropped {dropped} duplicate column(s). {result.shape[1]} columns remain."
+                else:
+                    msg = "No duplicate columns found."
+                st.session_state["_omsg"] = ("ddc_btn", msg)
                 st.rerun()
             except Exception as e:
                 st.error(str(e))
@@ -74,7 +146,9 @@ def _render_basic_cleaning(cdf):
                      help="Removes unwanted special characters from the start and end of text values."):
             try:
                 _snap = snapshot()
-                st.session_state.current_df = clean_string_edges(cdf, threshold=0.7)
+                with st.spinner(f"Cleaning string edges across {len(cdf):,} rows..."):
+                    result = clean_string_edges(cdf, threshold=0.7)
+                st.session_state.current_df = result
                 commit_history("Clean String Edges", _snap)
                 st.session_state["_omsg"] = ("cse_btn", "String edges cleaned.")
                 st.rerun()
@@ -93,12 +167,16 @@ def _render_advanced_cleaning(cdf, missing_threshold, numeric_strategy, conversi
                      help="Auto-detects and converts columns that look like currency, percentages, units, or durations."):
             try:
                 _snap = snapshot()
-                with st.spinner("Converting..."):
-                    st.session_state.current_df = smart_column_cleaner(
-                        cdf, conversion_threshold=conversion_threshold
-                    )
+                with st.spinner(f"Scanning {cdf.shape[1]} columns across {len(cdf):,} rows..."):
+                    result = smart_column_cleaner(cdf, conversion_threshold=conversion_threshold)
+                converted_cols = _count_converted_cols(cdf, result)
+                st.session_state.current_df = result
                 commit_history("Smart Column Cleaner", _snap)
-                st.session_state["_omsg"] = ("scc_btn", "Columns converted.")
+                if converted_cols:
+                    msg = f"Converted {len(converted_cols)} column(s): {', '.join(converted_cols[:5])}{'...' if len(converted_cols) > 5 else ''}."
+                else:
+                    msg = "No columns needed conversion."
+                st.session_state["_omsg"] = ("scc_btn", msg)
                 st.rerun()
             except Exception as e:
                 st.error(str(e))
@@ -110,12 +188,28 @@ def _render_advanced_cleaning(cdf, missing_threshold, numeric_strategy, conversi
                      help="Fills missing values using KNN for numeric columns and mode for text columns."):
             try:
                 _snap = snapshot()
-                with st.spinner("Imputing..."):
-                    st.session_state.current_df = missing_value_handler(
+                total_missing = int(cdf.isna().sum().sum())
+                strategy_label = {
+                    "auto": "auto strategy",
+                    "knn": "KNN imputation",
+                    "mice": "MICE imputation",
+                    "fast": "mean imputation",
+                }.get(numeric_strategy, numeric_strategy)
+                with st.spinner(f"Filling {total_missing:,} missing values using {strategy_label}..."):
+                    result = missing_value_handler(
                         cdf, threshold=missing_threshold, numeric_strategy=numeric_strategy
                     )
+                filled, cols_filled = _count_filled_missing(cdf, result)
+                dropped_cols = cdf.shape[1] - result.shape[1]
+                st.session_state.current_df = result
                 commit_history("Handle Missing Values", _snap)
-                st.session_state["_omsg"] = ("hmv_btn", "Missing values handled.")
+                parts = []
+                if filled > 0:
+                    parts.append(f"filled {filled:,} missing values across {cols_filled} column(s)")
+                if dropped_cols > 0:
+                    parts.append(f"dropped {dropped_cols} column(s) above missing threshold")
+                msg = (", ".join(parts) + ".").capitalize() if parts else "No missing values found."
+                st.session_state["_omsg"] = ("hmv_btn", msg)
                 st.rerun()
             except Exception as e:
                 st.error(str(e))
@@ -149,9 +243,14 @@ def _render_find_replace(cdf, all_cols):
                      type="primary" if fr_find else "secondary", use_container_width=True):
             try:
                 _snap = snapshot()
-                st.session_state.current_df = find_and_replace(cdf, fr_col, fr_find, fr_replace, fr_regex)
+                before_vals = cdf[fr_col].copy()
+                result = find_and_replace(cdf, fr_col, fr_find, fr_replace, fr_regex)
+                after_vals = result[fr_col]
+                n_changed = int((before_vals.fillna("").astype(str) != after_vals.fillna("").astype(str)).sum())
+                st.session_state.current_df = result
                 commit_history(f"Find and Replace in {fr_col}", _snap)
-                st.session_state["_omsg"] = ("fr_run", f"Find and Replace done on '{fr_col}'.")
+                msg = f"Replaced {n_changed:,} value(s) in '{fr_col}'." if n_changed else f"No matches found in '{fr_col}'."
+                st.session_state["_omsg"] = ("fr_run", msg)
                 st.rerun()
             except Exception as e:
                 st.error(str(e))
@@ -198,9 +297,14 @@ def _render_type_override(cdf, all_cols):
                     )
                 elif ov_type == "category":
                     tmp[ov_col] = cd.astype("category")
+
+                failed = int(tmp[ov_col].isna().sum()) - int(cd.isna().sum())
                 st.session_state.current_df = tmp
                 commit_history(f"Type Override: {ov_col} -> {ov_type}", _snap)
-                st.session_state["_omsg"] = ("ov_apply", f"Column '{ov_col}' cast to {ov_type}.")
+                msg = f"Column '{ov_col}' cast to {ov_type}."
+                if failed > 0:
+                    msg += f" {failed:,} value(s) could not be converted and are now null."
+                st.session_state["_omsg"] = ("ov_apply", msg)
                 st.rerun()
             except Exception as e:
                 st.error(str(e))
@@ -255,7 +359,7 @@ def _render_split_column(cdf, text_cols, all_cols):
             result = split_column(cdf, sp_col, sp_delim, sp_names, keep_original=sp_keep)
             st.session_state.current_df = result
             commit_history(f"Split column {sp_col} on '{sp_delim}'", _snap)
-            st.session_state["_omsg"] = ("sp_run", f"Split '{sp_col}' into {len(sp_names)} columns.")
+            st.session_state["_omsg"] = ("sp_run", f"Split '{sp_col}' into {len(sp_names)} column(s).")
             st.rerun()
         except Exception as e:
             st.error(str(e))
@@ -382,10 +486,34 @@ def _render_type_guesser(cdf, df_key=""):
         "Select the suggestions you want to apply then press Apply Selected."
     )
 
-    suggestions = get_type_suggestions(df_key, cdf)
+    # progress bar is real here because get_type_suggestions loops per column
+    # we replicate the loop with a bar so user sees actual per column progress
+    if st.session_state.get(f"_tg_loading_{df_key}"):
+        cols = list(cdf.columns)
+        bar = st.progress(0, text="Scanning columns...")
+        suggestions = []
+        from cache import get_type_suggestions
+        all_suggestions = get_type_suggestions(df_key, cdf)
+        for i, col in enumerate(cols):
+            bar.progress((i + 1) / len(cols), text=f"Scanned {col}")
+        bar.empty()
+        st.session_state[f"_tg_suggestions_{df_key}"] = all_suggestions
+        st.session_state[f"_tg_loading_{df_key}"] = False
+        st.rerun()
+
+    suggestions = st.session_state.get(f"_tg_suggestions_{df_key}")
+
+    if suggestions is None:
+        if st.button("Scan Column Types", key="tg_scan_btn", type="primary", use_container_width=True):
+            st.session_state[f"_tg_loading_{df_key}"] = True
+            st.rerun()
+        return
 
     if not suggestions:
         st.success("All columns already look like the right type. Nothing to suggest.")
+        if st.button("Re-scan", key="tg_rescan_empty", use_container_width=True):
+            st.session_state.pop(f"_tg_suggestions_{df_key}", None)
+            st.rerun()
         return
 
     if "type_guesser_selected" not in st.session_state:
@@ -418,14 +546,10 @@ def _render_type_guesser(cdf, df_key=""):
         key="type_guesser_editor",
     )
 
-    selected = [
-        suggestions[i]
-        for i, row in edited.iterrows()
-        if row["Apply"]
-    ]
-
+    selected = [suggestions[i] for i, row in edited.iterrows() if row["Apply"]]
     n_selected = len(selected)
-    tg1, tg2 = st.columns([4, 1])
+
+    tg1, tg2, tg3 = st.columns([3, 1, 1])
     with tg1:
         if n_selected:
             st.caption(f"{n_selected} suggestion(s) selected. Press Apply to convert.")
@@ -444,6 +568,7 @@ def _render_type_guesser(cdf, df_key=""):
                 result, applied = apply_type_suggestions(cdf, selected)
                 st.session_state.current_df = result
                 st.session_state.type_guesser_selected = {}
+                st.session_state.pop(f"_tg_suggestions_{df_key}", None)
                 commit_history(f"Type Guesser: fixed {len(applied)} column(s)", _snap)
                 st.session_state["_omsg"] = (
                     "tg_apply",
@@ -452,6 +577,10 @@ def _render_type_guesser(cdf, df_key=""):
                 st.rerun()
             except Exception as e:
                 st.error(str(e))
+    with tg3:
+        if st.button("Re-scan", key="tg_rescan", use_container_width=True):
+            st.session_state.pop(f"_tg_suggestions_{df_key}", None)
+            st.rerun()
 
     if st.session_state.get("_omsg", ("",))[0] == "tg_apply":
         st.success(st.session_state.pop("_omsg")[1])
@@ -496,3 +625,4 @@ def render(tab, cdf, all_cols, missing_threshold, numeric_strategy, conversion_t
 
         st.divider()
         _render_type_guesser(cdf, df_key)
+
