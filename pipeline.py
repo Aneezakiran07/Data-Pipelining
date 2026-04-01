@@ -1,19 +1,13 @@
 import json
-
 import streamlit as st
-
 
 def snapshot():
     return st.session_state.current_df.copy()
 
-
 def _autosave():
-    """
-    Saves the current session to disk after every mutating operation.
-    Runs only when a persist key is set, which happens after init_state.
-    The save is called after the mutation is committed to session state
-    so the file on disk always reflects the latest state.
-    """
+    # saves the current session to disk after every mutating operation
+    # runs only when a persist key is set which happens after init state
+    # the save is called after the mutation is committed to session state so the file on disk always reflects the latest state
     persist_key = st.session_state.get("_persist_key")
     if not persist_key:
         return
@@ -24,35 +18,66 @@ def _autosave():
             current_df=st.session_state.current_df,
             history=st.session_state.get("history", []),
             original_df=st.session_state.get("original_df", st.session_state.current_df),
+            redo_stack=st.session_state.get("redo_stack", [])
         )
     except Exception:
         pass
 
-
 def commit_history(label, snap):
     if "history" not in st.session_state:
         st.session_state.history = []
+    if "redo_stack" not in st.session_state:
+        st.session_state.redo_stack = []
+
     if len(st.session_state.history) >= 20:
         st.session_state.history.pop(0)
+
     st.session_state.history.append({"label": label, "df": snap})
     st.session_state["history_len"] = st.session_state.get("history_len", 0) + 1
+    
+    # clears redo stack because a new action creates a new timeline
+    st.session_state.redo_stack.clear()
     _autosave()
-
 
 def undo_last():
     if st.session_state.get("history"):
+        if "redo_stack" not in st.session_state:
+            st.session_state.redo_stack = []
+            
         last = st.session_state.history.pop()
+        
+        # saves the current state before we overwrite it so we can redo it later
+        st.session_state.redo_stack.append({
+            "label": last["label"],
+            "df": st.session_state.current_df.copy()
+        })
+        
         st.session_state.current_df = last["df"]
         st.session_state["history_len"] = st.session_state.get("history_len", 0) + 1
         _autosave()
         return last["label"]
     return None
 
+# applies the last undone action from the redo stack and moves it back to history
+def redo_action():
+    if st.session_state.get("redo_stack"):
+        next_action = st.session_state.redo_stack.pop()
+        
+        # pushes current state back to history before we apply the redone state
+        st.session_state.history.append({
+            "label": next_action["label"],
+            "df": st.session_state.current_df.copy()
+        })
+        
+        st.session_state.current_df = next_action["df"]
+        st.session_state["history_len"] = st.session_state.get("history_len", 0) + 1
+        _autosave()
+        return next_action["label"]
+    return None
 
 def export_pipeline_json(history):
     steps = [{"step": i + 1, "label": entry["label"]} for i, entry in enumerate(history)]
     return json.dumps({"version": 1, "steps": steps}, indent=2)
-
 
 def import_pipeline_json(json_bytes, df, settings):
     from cleaning.basic import (
@@ -85,27 +110,21 @@ def import_pipeline_json(json_bytes, df, settings):
         if label == "Strip Whitespace" or label.startswith("Fix: strip_whitespace"):
             tmp = stripping_whitespace(tmp)
             applied.append(label)
-
         elif label == "Drop Duplicate Rows" or label.startswith("Fix: drop_duplicates"):
             tmp = drop_duplicate_rows(tmp)
             applied.append(label)
-
         elif label == "Drop Duplicate Columns" or label.startswith("Fix: drop_dup_cols"):
             tmp = drop_duplicate_columns(tmp)
             applied.append(label)
-
         elif label == "Clean String Edges" or label.startswith("Fix: clean_edges"):
             tmp = clean_string_edges(tmp, threshold=0.7)
             applied.append(label)
-
-        elif label == "Smart Column Cleaner" or label.startswith("Fix: convert_"):
+        elif label == "Smart Column Cleaner" or label.startswith("Fix: convert"):
             tmp = smart_column_cleaner(tmp, conversion_threshold=conversion_threshold)
             applied.append(label)
-
         elif label == "Handle Missing Values" or label.startswith("Fix: handle_missing"):
             tmp = missing_value_handler(tmp, threshold=missing_threshold, numeric_strategy=numeric_strategy)
             applied.append(label)
-
         elif label == "Auto-Fix All":
             tmp = stripping_whitespace(tmp)
             tmp = drop_duplicate_rows(tmp)
@@ -114,12 +133,10 @@ def import_pipeline_json(json_bytes, df, settings):
             tmp = smart_column_cleaner(tmp, conversion_threshold=conversion_threshold)
             tmp = missing_value_handler(tmp, threshold=missing_threshold, numeric_strategy=numeric_strategy)
             applied.append(label)
-
         else:
             skipped.append(label)
 
     return tmp, applied, skipped
-
 
 def build_pipeline_script(history):
     lines = [
@@ -138,33 +155,27 @@ def build_pipeline_script(history):
 
         if label == "Strip Whitespace" or label.startswith("Fix: strip_whitespace"):
             lines.append("df = df.apply(lambda x: x.str.strip() if x.dtype == 'object' else x)")
-
         elif label == "Drop Duplicate Rows" or label.startswith("Fix: drop_duplicates"):
             lines.append("df = df.drop_duplicates().reset_index(drop=True)")
-
         elif label == "Drop Duplicate Columns" or label.startswith("Fix: drop_dup_cols"):
             lines.append("df = df.loc[:, ~df.columns.duplicated()]")
             lines.append("df = df.T.drop_duplicates().T")
-
         elif label == "Clean String Edges" or label.startswith("Fix: clean_edges"):
             lines.append("for col in df.select_dtypes(include='object').columns:")
-            lines.append("    df[col] = df[col].astype(str).str.replace(r'^\\W+', '', regex=True).str.replace(r'\\W+$', '', regex=True)")
-
-        elif label == "Smart Column Cleaner" or label.startswith("Fix: convert_"):
+            lines.append("    df[col] = df[col].astype(str).str.replace(r'^\W+', '', regex=True).str.replace(r'\W+$', '', regex=True)")
+        elif label == "Smart Column Cleaner" or label.startswith("Fix: convert"):
             lines.append("for col in df.select_dtypes(include='object').columns:")
-            lines.append("    cleaned = df[col].str.replace(r'[^\\d.\\-]', '', regex=True)")
+            lines.append("    cleaned = df[col].str.replace(r'[^\d.\-]', '', regex=True)")
             lines.append("    converted = pd.to_numeric(cleaned, errors='coerce')")
             lines.append("    if converted.notna().mean() > 0.6:")
             lines.append("        df[col] = converted")
-
         elif label == "Handle Missing Values" or label.startswith("Fix: handle_missing"):
             lines.append("df = df.replace(['?', 'NA', 'unknown', 'n/a', 'NaN', 'null', ''], np.nan)")
             lines.append("num_cols = df.select_dtypes(include=np.number).columns")
             lines.append("if not num_cols.empty and df[num_cols].isna().any().any():")
             lines.append("    df[num_cols] = KNNImputer(n_neighbors=5).fit_transform(df[num_cols])")
             lines.append("for col in df.select_dtypes(exclude=np.number).columns:")
-            lines.append("    df[col] = df[col].fillna(df[col].mode()[0] if not df[col].mode().empty else 'Missing')")
-
+            lines.append("    df[col] = df[col].fillna(df[col].mode() if not df[col].mode().empty else 'Missing')")
         elif label == "Auto-Fix All":
             lines.append("df = df.apply(lambda x: x.str.strip() if x.dtype == 'object' else x)")
             lines.append("df = df.drop_duplicates().reset_index(drop=True)")
@@ -173,15 +184,13 @@ def build_pipeline_script(history):
             lines.append("num_cols = df.select_dtypes(include=np.number).columns")
             lines.append("if not num_cols.empty and df[num_cols].isna().any().any():")
             lines.append("    df[num_cols] = KNNImputer(n_neighbors=5).fit_transform(df[num_cols])")
-
         elif label.startswith("Find and Replace in"):
             col = label.replace("Find and Replace in ", "").strip()
             lines.append(f"df['{col}'] = df['{col}'].astype(str).str.replace('FIND', 'REPLACE', regex=False)")
-
         elif label.startswith("Type Override:"):
             parts = label.replace("Type Override: ", "").split(" -> ")
             if len(parts) == 2:
-                col, dtype = parts[0].strip(), parts[1].strip()
+                col, dtype = parts.strip(), parts[1].strip()
                 if "int" in dtype:
                     lines.append(f"df['{col}'] = pd.to_numeric(df['{col}'], errors='coerce').astype('Int64')")
                 elif "float" in dtype:
@@ -194,43 +203,34 @@ def build_pipeline_script(history):
                     lines.append(f"df['{col}'] = df['{col}'].astype('category')")
                 else:
                     lines.append(f"df['{col}'] = df['{col}'].astype(str)")
-
         elif label.startswith("Split column"):
             lines.append("# split column, update col name and delimiter below")
             lines.append("# parts = df['col'].str.split('delimiter', expand=True)")
-            lines.append("# df['part1'] = parts[0]")
+            lines.append("# df['part1'] = parts")
             lines.append("# df['part2'] = parts[1]")
-
         elif label.startswith("Merge columns into"):
             new_col = label.replace("Merge columns into ", "").strip()
             lines.append(f"# df['{new_col}'] = df['col1'].astype(str) + ' ' + df['col2'].astype(str)")
-
         elif label.startswith("Rename"):
             lines.append("# df = df.rename(columns={'old_name': 'new_name'})")
-
         elif label == "Validate Email":
-            lines.append("pattern = r'^[\\w\\.\\+\\-]+@[\\w\\-]+\\.[a-zA-Z]{2,}$'")
+            lines.append("pattern = r'^[\w\.\+\-]+@[\w\-]+\.[a-zA-Z]{2,}$'")
             lines.append("# df['email_valid'] = df['email_col'].astype(str).str.match(pattern)")
-
         elif label == "Standardize Phone":
             lines.append("def standardize_phone(val):")
-            lines.append("    digits = re.sub(r'\\D', '', str(val))")
+            lines.append("    digits = re.sub(r'\D', '', str(val))")
             lines.append("    if len(digits) == 10: return f'+1{digits}'")
             lines.append("    elif len(digits) >= 7: return f'+{digits}'")
             lines.append("    return float('nan')")
             lines.append("# df['phone_col'] = df['phone_col'].apply(standardize_phone)")
-
         elif label == "Standardize Dates":
             lines.append("# df['date_col'] = pd.to_datetime(df['date_col'], errors='coerce').dt.strftime('%Y-%m-%d')")
-
         elif label == "Cap Outliers":
             lines.append("# col = 'your_column'")
             lines.append("# q1, q3 = df[col].quantile(0.25), df[col].quantile(0.75)")
             lines.append("# df[col] = df[col].clip(lower=q1 - 1.5*(q3-q1), upper=q3 + 1.5*(q3-q1))")
-
         elif label == "Validate Range":
             lines.append("# df = df[df['your_column'].between(0, 100)]")
-
         else:
             lines.append("# manual step, no code generated")
 
@@ -238,5 +238,6 @@ def build_pipeline_script(history):
 
     lines.append("print('Pipeline complete. Shape:', df.shape)")
     return "\n".join(lines)
+
 
 

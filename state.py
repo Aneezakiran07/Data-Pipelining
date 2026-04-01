@@ -175,6 +175,7 @@ def init_state(df, load_key, file_bytes: bytes = b"", filename: str = ""):
                 "state_key_id": state_key,
                 "file_just_loaded": True,
                 "_persist_key": stable_key,
+                "redo_stack": saved.get("redo_stack", []),
             })
             if "val_selected" not in st.session_state:
                 st.session_state.val_selected = {}
@@ -237,3 +238,5 @@ def col_popover(section, available_cols):
         for c in available_cols:
             st.checkbox(c, key=f"_vc_{section}_{c}", on_change=_make_col_handler(section, c))
     return n
+
+
