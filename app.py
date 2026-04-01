@@ -59,15 +59,14 @@ else:
         maybe_reset_on_new_upload(file_id)
 
         uploaded.seek(0)
-        file_bytes, selected_sheet = resolve_upload(uploaded)
 
-        load_key = f"{file_id}_{selected_sheet}"
-        with st.spinner("Loading your file..."):
+        # spinner starts before resolve_upload so Excel sheet detection delay
+        # is also covered, not just the parse step
+        with st.spinner(f"Loading {uploaded.name}..."):
+            file_bytes, selected_sheet = resolve_upload(uploaded)
+            load_key = f"{file_id}_{selected_sheet}"
             df = load_file(file_bytes, uploaded.name, load_key, sheet_name=selected_sheet)
-            # file_bytes and filename are passed so init_state can build a stable
-            # session key from filename plus size instead of file_id which changes on reload
             init_state(df, load_key, file_bytes=file_bytes, filename=uploaded.name)
-            st.write("persist key in state:", st.session_state.get("_persist_key"))
 
         # init_state calls st.stop() while the resume dialog is open
         # so current_df will not exist yet in that render pass
@@ -84,7 +83,7 @@ else:
         num_cols = list(cdf.select_dtypes(include=np.number).columns)
 
         st.info(
-            f"{uploaded.name}  |  {stats['rows']} rows x {stats['columns']} cols  |  "
+            f"{uploaded.name}  |  {stats['rows']:,} rows x {stats['columns']} cols  |  "
             f"{stats['memory_usage']:.2f} MB"
         )
 
@@ -136,8 +135,3 @@ else:
     except Exception as e:
         st.error(f"Error reading the file: {e}")
         st.info("Make sure your file is a valid CSV or Excel format.")
-
-        sjs
-        sk
-        sk
-        

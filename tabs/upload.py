@@ -33,4 +33,15 @@ def render(tab):
             )
             st.caption("The pipeline handles currency, percentages, units, missing values, and more.")
         else:
-            st.success(f"{uploaded.name} is loaded. Navigate to any tab to start cleaning.")
+            # loaded_file_id is only set in session state after app.py fully
+            # finishes init_state, so we can use it to distinguish between
+            # the first render pass (file picked, not yet loaded) and done
+            already_loaded = st.session_state.get("loaded_file_id") == uploaded.file_id
+
+            if already_loaded:
+                st.success(f"{uploaded.name} is loaded. Navigate to any tab to start cleaning.")
+            else:
+                # this shows on the very first rerun after the user picks the file
+                # before app.py has had a chance to read and parse it
+                # gives immediate visual confirmation that the upload was accepted
+                st.info(f"Reading {uploaded.name}, please wait...")
