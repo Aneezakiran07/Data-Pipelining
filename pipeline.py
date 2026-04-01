@@ -239,3 +239,4 @@ def build_pipeline_script(history):
     lines.append("print('Pipeline complete. Shape:', df.shape)")
     return "\n".join(lines)
 
+

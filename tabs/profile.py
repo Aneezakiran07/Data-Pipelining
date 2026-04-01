@@ -197,6 +197,9 @@ def _render_correlation_heatmap(data):
     col_order = data["col_order"]
     n_cols = data["n_cols"]
 
+    if data.get("is_sampled"):
+        st.caption(f"Computed on a {data['sample_size']:,} row sample for performance.")
+
     chart = {
         "mark": "rect",
         "data": {"values": data["rows"]},
@@ -235,7 +238,10 @@ def _render_correlation_heatmap(data):
         },
     }
 
-    final_chart = {"layer": [chart, text_layer], "width": "container", "height": max(200, 36 * n_cols)} if n_cols <= 12 else chart
+    final_chart = (
+        {"layer": [chart, text_layer], "width": "container", "height": max(200, 36 * n_cols)}
+        if n_cols <= 12 else chart
+    )
     st.vega_lite_chart(final_chart, use_container_width=True)
 
     off_diag = [r for r in data["rows"] if r["col_a"] != r["col_b"]]
@@ -262,7 +268,6 @@ def render(tab, cdf, mode="Simple"):
 
         df_key = st.session_state.get("current_df_key", "")
 
-        # Column profiler,always shown, lightweight
         st.subheader("Column Profiler")
         st.caption("Per-column stats including min, max, mean, median, std, skewness, and sample values.")
         profile = get_column_profile(df_key, cdf)
@@ -277,7 +282,6 @@ def render(tab, cdf, mode="Simple"):
 
         st.divider()
 
-        # Distribution chartsonly computes the selected column, not all
         st.subheader("Distribution Charts")
         st.caption(
             "Select a column to see its distribution. "
@@ -331,12 +335,23 @@ def render(tab, cdf, mode="Simple"):
                         "Method", ["pearson", "spearman", "kendall"], key="corr_method",
                         help="Pearson is standard. Spearman handles outliers better. Kendall is robust on small datasets.",
                     )
-                    corr_data = get_correlation_data(df_key, cdf, method=corr_method)
-                    _render_correlation_heatmap(corr_data)
+                    # correlation is only computed when user explicitly clicks the button
+                    # this prevents it from blocking page load on large files
+                    corr_key = f"corr_computed_{df_key}_{corr_method}"
+                    if not st.session_state.get(corr_key):
+                        st.write("Correlation computation can be slow on wide datasets.")
+                        if st.button("Compute Correlation", key="corr_btn", type="primary"):
+                            st.session_state[corr_key] = True
+                            st.rerun()
+                    else:
+                        corr_data = get_correlation_data(df_key, cdf, method=corr_method)
+                        _render_correlation_heatmap(corr_data)
+                        if st.button("Recompute", key="corr_recompute_btn"):
+                            st.session_state[corr_key] = False
+                            st.rerun()
 
         st.divider()
 
-        # Before/after comparison 
         with st.expander("Before and After Comparison", expanded=False):
             original_df = st.session_state.original_df
             shared = [c for c in original_df.columns if c in cdf.columns]
@@ -364,7 +379,3 @@ def render(tab, cdf, mode="Simple"):
                     f"{n_ch} row(s) changed in this preview window."
                     if n_ch else "No differences found in this preview window."
                 )
-
-
-
-            

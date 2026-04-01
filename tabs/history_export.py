@@ -34,6 +34,7 @@ def _render_reset():
 def _render_download(cdf):
     st.subheader("Download Cleaned Data")
     d1, d2 = st.columns(2)
+
     with d1:
         st.download_button(
             "Download as CSV",
@@ -43,24 +44,37 @@ def _render_download(cdf):
             key="dl_csv",
             use_container_width=True,
         )
+
     with d2:
+        # excel generation is slow on large files because openpyxl writes row by row
+        # moving it behind a prepare button means the tab renders instantly
+        # and only generates the file when the user actually wants it
         excel_cache_key = st.session_state.get("history_len", 0)
-        if st.session_state.get("_excel_cache_key") != excel_cache_key:
-            buf = io.BytesIO()
-            import pandas as pd
-            with pd.ExcelWriter(buf, engine="openpyxl") as w:
-                cdf.to_excel(w, index=False, sheet_name="Cleaned Data")
-                st.session_state.original_df.to_excel(w, index=False, sheet_name="Original Data")
-            st.session_state["_excel_bytes"] = buf.getvalue()
-            st.session_state["_excel_cache_key"] = excel_cache_key
-        st.download_button(
-            "Download as Excel",
-            data=st.session_state["_excel_bytes"],
-            file_name="cleaned_data.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key="dl_xlsx",
-            use_container_width=True,
+        excel_ready = (
+            st.session_state.get("_excel_bytes") is not None
+            and st.session_state.get("_excel_cache_key") == excel_cache_key
         )
+
+        if not excel_ready:
+            if st.button("Prepare Excel Download", key="prep_xlsx", use_container_width=True):
+                with st.spinner("Building Excel file..."):
+                    buf = io.BytesIO()
+                    import pandas as pd
+                    with pd.ExcelWriter(buf, engine="openpyxl") as w:
+                        cdf.to_excel(w, index=False, sheet_name="Cleaned Data")
+                        st.session_state.original_df.to_excel(w, index=False, sheet_name="Original Data")
+                    st.session_state["_excel_bytes"] = buf.getvalue()
+                    st.session_state["_excel_cache_key"] = excel_cache_key
+                st.rerun()
+        else:
+            st.download_button(
+                "Download as Excel",
+                data=st.session_state["_excel_bytes"],
+                file_name="cleaned_data.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="dl_xlsx",
+                use_container_width=True,
+            )
 
 
 def _render_history(hist):
