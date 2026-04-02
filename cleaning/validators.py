@@ -1,5 +1,3 @@
-import re
-
 import numpy as np
 import pandas as pd
 
@@ -26,18 +24,16 @@ def validate_phone_col(df, col):
         raise ValueError(f"Column '{col}' not found")
     df_clean = df.copy()
 
-    def standardize(val):
-        digits = re.sub("[^0-9]", "", str(val))
-        
-        if len(digits) == 10:
-            return f"+1{digits}"
-        elif len(digits) == 11 and digits.startswith("1"):
-            return f"+{digits}"
-        elif len(digits) >= 7:
-            return f"+{digits}"
-        return np.nan
+    # vectorized: strip all non-digit characters across the whole column at once
+    digits = df_clean[col].astype(str).str.replace(r"\D", "", regex=True)
+    length = digits.str.len()
 
-    df_clean[col] = df_clean[col].apply(standardize)
+    result = pd.Series(np.nan, index=df_clean.index, dtype=object)
+    result = result.where(~(length == 10), "+1" + digits)
+    result = result.where(~((length == 11) & digits.str.startswith("1")), "+" + digits)
+    result = result.where(~((length >= 7) & ~(length == 10) & ~((length == 11) & digits.str.startswith("1"))), "+" + digits)
+
+    df_clean[col] = result
     return df_clean
 
 
@@ -46,27 +42,29 @@ def validate_date_col(df, col, output_format="%Y-%m-%d"):
     if col not in df.columns:
         raise ValueError(f"Column '{col}' not found")
     df_clean = df.copy()
-    fmts = [
-        "%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%Y/%m/%d", "%d-%m-%Y",
-        "%m-%d-%Y", "%d %b %Y", "%d %B %Y", "%b %d, %Y", "%B %d, %Y",
-        "%d/%m/%y", "%m/%d/%y", "%Y.%m.%d", "%d.%m.%Y",
-    ]
 
-    def parse(val):
-        if pd.isna(val) or str(val).strip() == "":
-            return pd.NaT
-        s = str(val).strip()
+    # vectorized: pd.to_datetime with infer_datetime_format handles the vast
+    # majority of formats in one C-level pass; only unparseable values become NaT
+    cleaned = df_clean[col].astype(str).str.strip().replace("", np.nan).replace("nan", np.nan)
+    parsed = pd.to_datetime(cleaned, infer_datetime_format=True, errors="coerce")
+
+    # second pass: try the explicit format list only for rows that failed the
+    # first pass — keeps the fast path fast and still handles edge-case formats
+    failed_mask = parsed.isna() & cleaned.notna()
+    if failed_mask.any():
+        fmts = [
+            "%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%Y/%m/%d", "%d-%m-%Y",
+            "%m-%d-%Y", "%d %b %Y", "%d %B %Y", "%b %d, %Y", "%B %d, %Y",
+            "%d/%m/%y", "%m/%d/%y", "%Y.%m.%d", "%d.%m.%Y",
+        ]
         for fmt in fmts:
-            try:
-                return pd.to_datetime(s, format=fmt)
-            except Exception:
-                continue
-        try:
-            return pd.to_datetime(s)
-        except Exception:
-            return pd.NaT
+            still_failed = parsed.isna() & cleaned.notna()
+            if not still_failed.any():
+                break
+            parsed[still_failed] = pd.to_datetime(
+                cleaned[still_failed], format=fmt, errors="coerce"
+            )
 
-    parsed = df_clean[col].apply(parse)
     df_clean[col] = parsed.dt.strftime(output_format).where(parsed.notna(), other=None)
     return df_clean
 
@@ -106,3 +104,4 @@ def validate_range(df, col, min_val, max_val, action="flag"):
     else:
         df_clean = df_clean[in_range].reset_index(drop=True)
     return df_clean
+

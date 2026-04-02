@@ -27,7 +27,7 @@ def _render_reset():
             st.session_state.history = []
             st.session_state.redo_stack = []
             st.session_state["history_len"] = st.session_state.get("history_len", 0) + 1
-        st.session_state["_toast"] = ("Data reset to original.", "✅")
+        st.session_state["_toast"] = ("Data reset to original.", "✔")
         st.rerun()
 
 
@@ -62,7 +62,7 @@ def _render_download(cdf):
                         st.session_state.original_df.to_excel(w, index=False, sheet_name="Original Data")
                     st.session_state["_excel_bytes"] = buf.getvalue()
                     st.session_state["_excel_cache_key"] = excel_cache_key
-                st.session_state["_toast"] = ("Excel file ready to download.", "✅")
+                st.session_state["_toast"] = ("Excel file ready to download.", "✔")
                 st.rerun()
         else:
             st.download_button(
@@ -109,7 +109,7 @@ def _render_history(hist):
             with st.spinner("Undoing last action..."):
                 label = undo_last()
             if label:
-                st.session_state["_toast"] = (f"Undone: {label}", "↩️")
+                st.session_state["_toast"] = (f"Undone: {label}", "✔")
                 st.rerun()
 
     with h2:
@@ -119,7 +119,7 @@ def _render_history(hist):
             with st.spinner("Redoing action..."):
                 label = redo_action()
             if label:
-                st.session_state["_toast"] = (f"Redone: {label}", "↪️")
+                st.session_state["_toast"] = (f"Redone: {label}", "✔")
                 st.rerun()
 
     with h3:
@@ -134,7 +134,7 @@ def _render_history(hist):
                         delete_session(persist_key)
                     except Exception:
                         pass
-            st.session_state["_toast"] = ("History cleared.", "🗑️")
+            st.session_state["_toast"] = ("History cleared.", "✔")
             st.rerun()
 
 
@@ -204,7 +204,7 @@ def _render_pipeline_json(hist, settings):
                                 + ", ".join(skipped[:5])
                                 + ("..." if len(skipped) > 5 else "")
                             )
-                        st.session_state["_toast"] = (" ".join(msg_parts), "✅")
+                        st.session_state["_toast"] = (" ".join(msg_parts), "✔")
                         st.session_state.pop("_json_bytes", None)
                         st.session_state.pop("_json_file_key", None)
                     except Exception as e:
@@ -255,7 +255,7 @@ def _render_report_pdf(cdf, hist, filename):
                 )
                 st.session_state["_pdf_bytes"] = pdf_bytes
                 st.session_state["_pdf_ready"] = True
-                st.session_state["_toast"] = ("PDF report ready to download.", "✅")
+                st.session_state["_toast"] = ("PDF report ready to download.", "✔")
             except Exception as e:
                 st.error(f"Could not generate PDF: {e}")
                 st.session_state["_pdf_ready"] = False
@@ -275,7 +275,7 @@ def _render_report_pdf(cdf, hist, filename):
 def render(tab, cdf, settings, df_key=""):
     filename = settings.get("filename", "dataset")
     with tab:
-        # fire any pending toast from the previous rerun
+        # fire pending toast from previous rerun
         if "_toast" in st.session_state:
             msg, icon = st.session_state.pop("_toast")
             st.toast(msg, icon=icon)

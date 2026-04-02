@@ -9,7 +9,7 @@ def render(tab, cdf, text_cols, num_cols, df_key=""):
     with tab:
         st.subheader("Validation and Quality")
 
-        # fire any pending toast from the previous rerun
+        # fire pending toast from previous rerun
         if "_toast" in st.session_state:
             msg, icon = st.session_state.pop("_toast")
             st.toast(msg, icon=icon)
@@ -39,7 +39,7 @@ def render(tab, cdf, text_cols, num_cols, df_key=""):
                         st.session_state.current_df = tmp
                         commit_history("Validate Email", _snap)
                         st.session_state.val_selected.pop("email", None)
-                        st.session_state["_toast"] = (f"Email validation done on {n_em} column(s).", "✅")
+                        st.session_state["_toast"] = (f"Email validation done on {n_em} column(s).", "✔")
                         st.rerun()
                     except Exception as e:
                         st.error(str(e))
@@ -64,7 +64,7 @@ def render(tab, cdf, text_cols, num_cols, df_key=""):
                         st.session_state.current_df = tmp
                         commit_history("Standardize Phone", _snap)
                         st.session_state.val_selected.pop("phone", None)
-                        st.session_state["_toast"] = (f"Phone standardized in {n_ph} column(s).", "✅")
+                        st.session_state["_toast"] = (f"Phone standardized in {n_ph} column(s).", "✔")
                         st.rerun()
                     except Exception as e:
                         st.error(str(e))
@@ -94,7 +94,7 @@ def render(tab, cdf, text_cols, num_cols, df_key=""):
                         st.session_state.current_df = tmp
                         commit_history("Standardize Dates", _snap)
                         st.session_state.val_selected.pop("date", None)
-                        st.session_state["_toast"] = (f"Dates standardized in {n_dt} column(s).", "✅")
+                        st.session_state["_toast"] = (f"Dates standardized in {n_dt} column(s).", "✔")
                         st.rerun()
                     except Exception as e:
                         st.error(str(e))
@@ -138,7 +138,7 @@ def render(tab, cdf, text_cols, num_cols, df_key=""):
                             if o_action == "cap"
                             else f"Removed {before - after:,} outlier rows."
                         )
-                        st.session_state["_toast"] = (msg, "✅")
+                        st.session_state["_toast"] = (msg, "✔")
                         st.rerun()
                     except Exception as e:
                         st.error(str(e))
@@ -178,7 +178,7 @@ def render(tab, cdf, text_cols, num_cols, df_key=""):
                             if rng_act == "flag"
                             else f"Removed {before - after:,} out of range rows."
                         )
-                        st.session_state["_toast"] = (msg, "✅")
+                        st.session_state["_toast"] = (msg, "✔")
                         st.rerun()
                     except Exception as e:
                         st.error(str(e))

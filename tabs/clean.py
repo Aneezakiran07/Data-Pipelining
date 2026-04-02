@@ -82,7 +82,7 @@ def _render_basic_cleaning(cdf):
                     f"Stripped whitespace from {cols_changed} column(s), {total_changed:,} values cleaned."
                     if total_changed > 0 else "No whitespace found. Data already clean."
                 )
-                st.session_state["_toast"] = (msg, "✅")
+                st.session_state["_toast"] = (msg, "✔")
                 st.rerun()
             except Exception as e:
                 st.error(str(e))
@@ -102,7 +102,7 @@ def _render_basic_cleaning(cdf):
                     f"Dropped {dropped:,} duplicate rows ({dropped/before*100:.1f}%). {len(result):,} rows remain."
                     if dropped > 0 else "No duplicate rows found."
                 )
-                st.session_state["_toast"] = (msg, "✅")
+                st.session_state["_toast"] = (msg, "✔")
                 st.rerun()
             except Exception as e:
                 st.error(str(e))
@@ -122,7 +122,7 @@ def _render_basic_cleaning(cdf):
                     f"Dropped {dropped} duplicate column(s). {result.shape[1]} columns remain."
                     if dropped > 0 else "No duplicate columns found."
                 )
-                st.session_state["_toast"] = (msg, "✅")
+                st.session_state["_toast"] = (msg, "✔")
                 st.rerun()
             except Exception as e:
                 st.error(str(e))
@@ -136,7 +136,7 @@ def _render_basic_cleaning(cdf):
                     result = clean_string_edges(cdf, threshold=0.7)
                 st.session_state.current_df = result
                 commit_history("Clean String Edges", _snap)
-                st.session_state["_toast"] = ("String edges cleaned.", "✅")
+                st.session_state["_toast"] = ("String edges cleaned.", "✔")
                 st.rerun()
             except Exception as e:
                 st.error(str(e))
@@ -160,7 +160,7 @@ def _render_advanced_cleaning(cdf, missing_threshold, numeric_strategy, conversi
                     f"Converted {len(converted_cols)} column(s): {', '.join(converted_cols[:5])}{'...' if len(converted_cols) > 5 else ''}."
                     if converted_cols else "No columns needed conversion."
                 )
-                st.session_state["_toast"] = (msg, "✅")
+                st.session_state["_toast"] = (msg, "✔")
                 st.rerun()
             except Exception as e:
                 st.error(str(e))
@@ -191,7 +191,7 @@ def _render_advanced_cleaning(cdf, missing_threshold, numeric_strategy, conversi
                 if dropped_cols > 0:
                     parts.append(f"dropped {dropped_cols} column(s) above missing threshold")
                 msg = (", ".join(parts) + ".").capitalize() if parts else "No missing values found."
-                st.session_state["_toast"] = (msg, "✅")
+                st.session_state["_toast"] = (msg, "✔")
                 st.rerun()
             except Exception as e:
                 st.error(str(e))
@@ -226,7 +226,7 @@ def _render_find_replace(cdf, all_cols):
                 st.session_state.current_df = result
                 commit_history(f"Find and Replace in {fr_col}", _snap)
                 msg = f"Replaced {n_changed:,} value(s) in '{fr_col}'." if n_changed else f"No matches found in '{fr_col}'."
-                st.session_state["_toast"] = (msg, "✅")
+                st.session_state["_toast"] = (msg, "✔")
                 st.rerun()
             except Exception as e:
                 st.error(str(e))
@@ -273,7 +273,7 @@ def _render_type_override(cdf, all_cols):
                 msg = f"Column '{ov_col}' cast to {ov_type}."
                 if failed > 0:
                     msg += f" {failed:,} value(s) could not be converted and are now null."
-                st.session_state["_toast"] = (msg, "✅")
+                st.session_state["_toast"] = (msg, "✔")
                 st.rerun()
             except Exception as e:
                 st.error(str(e))
@@ -309,7 +309,7 @@ def _render_split_column(cdf, text_cols, all_cols):
                 result = split_column(cdf, sp_col, sp_delim, sp_names, keep_original=sp_keep)
             st.session_state.current_df = result
             commit_history(f"Split column {sp_col} on '{sp_delim}'", _snap)
-            st.session_state["_toast"] = (f"Split '{sp_col}' into {len(sp_names)} column(s).", "✅")
+            st.session_state["_toast"] = (f"Split '{sp_col}' into {len(sp_names)} column(s).", "✔")
             st.rerun()
         except Exception as e:
             st.error(str(e))
@@ -341,7 +341,7 @@ def _render_merge_columns(cdf, all_cols):
                 result = merge_columns(cdf, mg_cols, mg_new.strip(), mg_sep, keep_originals=mg_keep)
             st.session_state.current_df = result
             commit_history(f"Merge columns into {mg_new.strip()}", _snap)
-            st.session_state["_toast"] = (f"Merged {len(mg_cols)} columns into '{mg_new.strip()}'.", "✅")
+            st.session_state["_toast"] = (f"Merged {len(mg_cols)} columns into '{mg_new.strip()}'.", "✔")
             st.rerun()
         except Exception as e:
             st.error(str(e))
@@ -385,7 +385,7 @@ def _render_rename_columns(cdf, all_cols):
                 st.session_state.current_df = result
                 st.session_state.rename_state = {}
                 commit_history(f"Rename {len(changes)} column(s)", _snap)
-                st.session_state["_toast"] = (f"Renamed {len(changes)} column(s).", "✅")
+                st.session_state["_toast"] = (f"Renamed {len(changes)} column(s).", "✔")
                 st.rerun()
             except Exception as e:
                 st.error(str(e))
@@ -398,7 +398,7 @@ def _render_type_guesser(cdf, df_key=""):
         "Select the suggestions you want to apply then press Apply Selected."
     )
 
-    # real per column progress since get_type_suggestions loops column by column
+    # per column progress bar
     if st.session_state.get(f"_tg_loading_{df_key}"):
         cols = list(cdf.columns)
         bar = st.progress(0, text=f"Scanning {len(cdf):,} rows — checking column 1 of {len(cols)}...")
@@ -475,7 +475,7 @@ def _render_type_guesser(cdf, df_key=""):
                 st.session_state.type_guesser_selected = {}
                 st.session_state.pop(f"_tg_suggestions_{df_key}", None)
                 commit_history(f"Type Guesser: fixed {len(applied)} column(s)", _snap)
-                st.session_state["_toast"] = (f"Converted {len(applied)} column(s): {', '.join(applied)}.", "✅")
+                st.session_state["_toast"] = (f"Converted {len(applied)} column(s): {', '.join(applied)}.", "✔")
                 st.rerun()
             except Exception as e:
                 st.error(str(e))
@@ -498,7 +498,7 @@ def render(tab, cdf, all_cols, missing_threshold, numeric_strategy, conversion_t
     with tab:
         st.subheader("Manual Cleaning Operations")
 
-        # fire any pending toast from the previous rerun
+        # fire pending toast from previous rerun
         if "_toast" in st.session_state:
             msg, icon = st.session_state.pop("_toast")
             st.toast(msg, icon=icon)
