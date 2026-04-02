@@ -91,13 +91,26 @@ def _show_resume_dialog(stable_key: str, saved_info: dict):
         if st.button("Continue where I left off", type="primary", use_container_width=True):
             st.session_state["_resume_choice"] = "continue"
             st.session_state["_resume_stable_key"] = stable_key
-            # scope app breaks out of dialog context, scoped rerun rerenders inside dialog
+            # store label so app.py can show it as a spinner on the next render
+            st.session_state["_resume_loading_msg"] = "Loading your previous session..."
             st.rerun(scope="app")
     with col2:
         if st.button("Start fresh", use_container_width=True):
             st.session_state["_resume_choice"] = "fresh"
             st.session_state["_resume_stable_key"] = stable_key
+            st.session_state["_resume_loading_msg"] = "Starting a fresh session..."
             st.rerun(scope="app")
+
+
+def show_resume_spinner_if_pending():
+    """
+    Call this in app.py right before the init_state call inside the spinner block.
+    Renders an info banner while init_state is running so the page is not blank.
+    Cleared inside init_state once loading finishes.
+    """
+    msg = st.session_state.get("_resume_loading_msg")
+    if msg:
+        st.info(msg)
 
 
 def init_state(df, load_key, file_bytes: bytes = b"", filename: str = ""):
@@ -115,6 +128,8 @@ def init_state(df, load_key, file_bytes: bytes = b"", filename: str = ""):
     if st.session_state.get("state_key_id") == state_key:
         st.session_state["file_just_loaded"] = False
         st.session_state["current_df_key"] = make_df_key(st.session_state.current_df)
+        # clear loading message once state is confirmed ready
+        st.session_state.pop("_resume_loading_msg", None)
         return
 
     cleanup_old_sessions()
@@ -137,6 +152,7 @@ def init_state(df, load_key, file_bytes: bytes = b"", filename: str = ""):
         if saved:
             st.session_state.pop("_resume_choice", None)
             st.session_state.pop("_resume_stable_key", None)
+            st.session_state.pop("_resume_loading_msg", None)
 
             orig_df = saved["original_df"]
             curr_df = saved["current_df"]
@@ -167,6 +183,7 @@ def init_state(df, load_key, file_bytes: bytes = b"", filename: str = ""):
         delete_session(stable_key)
         st.session_state.pop("_resume_choice", None)
         st.session_state.pop("_resume_stable_key", None)
+        st.session_state.pop("_resume_loading_msg", None)
 
     df_key = make_df_key(df)
     st.session_state.update({
@@ -220,3 +237,5 @@ def col_popover(section, available_cols):
         for c in available_cols:
             st.checkbox(c, key=f"_vc_{section}_{c}", on_change=_make_col_handler(section, c))
     return n
+
+

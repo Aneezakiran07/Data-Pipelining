@@ -60,8 +60,9 @@ else:
 
         uploaded.seek(0)
 
-        # spinner starts before resolve_upload so Excel sheet detection delay
-        # is also covered, not just the parse step
+        # spinner wraps only the parse and init work
+        # st.rerun is intentionally outside this block so the spinner
+        # has a chance to render before the script reruns
         with st.spinner(f"Loading {uploaded.name}..."):
             file_bytes, selected_sheet = resolve_upload(uploaded)
             load_key = f"{file_id}_{selected_sheet}"
@@ -122,16 +123,10 @@ else:
         }
         history_export.render(tab_history, cdf, pipeline_settings)
 
-        # this means the page is fully visible before Gemini is called
-        # on first load this triggers a rerun once insights are ready
-        # on subsequent reruns the cache hit is instant and nothing blocks
-        ai_cache_key = f"ai_insights_{load_key}"
-        if ai_cache_key not in st.session_state:
-            from ai_insights import get_ai_insights
-            with st.spinner("AI is reading your data..."):
-                get_ai_insights(cdf, load_key)
-            st.rerun()
+        # ai insights are fetched on demand inside guide.py when the user opens the guide tab
+        # nothing needs to run here at page load time
 
     except Exception as e:
         st.error(f"Error reading the file: {e}")
         st.info("Make sure your file is a valid CSV or Excel format.")
+3

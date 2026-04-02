@@ -105,6 +105,7 @@ Rules:
 
 
 def _call_gemini(df):
+    # calls the standard non-streaming endpoint and returns parsed json result
     api_key = _get_api_key()
     if not api_key:
         return None, "GEMINI_API_KEY not set."
@@ -122,7 +123,7 @@ def _call_gemini(df):
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
+        with urllib.request.urlopen(req, timeout=30) as resp:
             body = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         error_body = e.read().decode("utf-8")
@@ -162,15 +163,28 @@ def get_ai_insights(df, file_id):
 def render_summary(df, file_id):
     """
     Renders the AI summary in the Overview tab.
-    NEVER triggers the API call — only reads from cache.
-    The actual API call is made in app.py after all tabs render.
+    Uses the same ai_insights cache key as guide.py so one api call populates both tabs.
+    If the user already clicked Analyse my data in the Guide tab the summary
+    shows here instantly with no extra api call and vice versa.
     """
     cache_key = f"ai_insights_{file_id}"
+
     insights = st.session_state.get(cache_key)
-    if not insights:
-        # still loading,show a subtle placeholder, not a spinner
-        st.caption("AI summary loading...")
+
+    if insights:
+        summary = insights.get("summary", "")
+        if summary:
+            st.info(f"**AI Summary:** {summary}")
         return
-    summary = insights.get("summary", "")
-    if summary:
-        st.info(f"**AI Summary:** {summary}")
+
+    # nothing cached yet, show button so user triggers on demand
+    # do not call the api automatically as it blocks all tabs from rendering
+    if st.button("Generate AI Summary", key="gen_summary_btn", use_container_width=True):
+        # shows spinner while calling gemini for the full insights json
+        with st.spinner("Generating AI summary, please wait..."):
+            result, err = get_ai_insights(df, file_id)
+        if err or not result:
+            st.caption("AI summary unavailable.")
+            return
+        # result is now in session state under cache_key, rerun to display it
+        st.rerun()

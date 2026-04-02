@@ -89,12 +89,24 @@ def _render_ai_section(cdf, file_id):
     st.markdown("## AI Analysis")
     st.caption("AI has read your specific data and tells you exactly what to fix and how.")
 
-    # never trigger the API call here — app.py handles that after all tabs render
     cache_key = f"ai_insights_{file_id}"
+
+    # check cache first, if already fetched just render immediately
     insights = st.session_state.get(cache_key)
 
     if not insights:
-        st.caption("AI analysis loading...")
+        # do not call the api on page load, that blocks all tabs for 6 to 7 seconds
+        # one click populates both this tab and the overview summary at the same time
+        st.write("")
+        if st.button("Analyse my data", key="ai_analyse_btn", type="primary", use_container_width=True):
+            # shows spinner while fetching full insights json from gemini
+            with st.spinner("Analysing your data, please wait..."):
+                insights, err = get_ai_insights(cdf, file_id)
+            if err or not insights:
+                st.caption("AI analysis unavailable right now.")
+                return
+            # cache is now populated, rerun so both this tab and overview render from it
+            st.rerun()
         return
 
     summary = insights.get("summary", "")
