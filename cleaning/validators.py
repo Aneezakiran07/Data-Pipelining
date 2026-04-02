@@ -27,7 +27,8 @@ def validate_phone_col(df, col):
     df_clean = df.copy()
 
     def standardize(val):
-        digits = re.sub(r"\D", "", str(val))
+        digits = re.sub("[^0-9]", "", str(val))
+        
         if len(digits) == 10:
             return f"+1{digits}"
         elif len(digits) == 11 and digits.startswith("1"):
