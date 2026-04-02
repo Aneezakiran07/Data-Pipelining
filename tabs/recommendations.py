@@ -107,10 +107,11 @@ def _apply_fix(action_key, sel_cols, cdf, missing_threshold, numeric_strategy):
 
 
 def _render_recommendations(cdf, conversion_threshold, missing_threshold, numeric_strategy, df_key):
-    """
-    Separated into its own function so it only runs when the user has
-    explicitly clicked the Recommendations tab via the load button.
-    """
+    # fire any pending toast from the previous rerun
+    if "_toast" in st.session_state:
+        msg, icon = st.session_state.pop("_toast")
+        st.toast(msg, icon=icon)
+
     show_msg()
     st.subheader("Smart Recommendations")
 
@@ -160,11 +161,14 @@ def _render_recommendations(cdf, conversion_threshold, missing_threshold, numeri
                     sel_cols = st.session_state.selected_columns.get(action_key, [])
                     try:
                         _snap = snapshot()
-                        tmp = _apply_fix(action_key, sel_cols, cdf, missing_threshold, numeric_strategy)
+                        with st.spinner(f"Fixing {action_key.replace('_', ' ')} in {len(sel_cols)} column(s)..."):
+                            tmp = _apply_fix(action_key, sel_cols, cdf, missing_threshold, numeric_strategy)
                         st.session_state.current_df = tmp
                         commit_history(f"Fix: {action_key}", _snap)
                         st.session_state.selected_columns.pop(action_key, None)
-                        st.session_state.last_success_msg = f"Fixed {action_key} on {len(sel_cols)} column(s)."
+                        st.session_state["_toast"] = (
+                            f"Fixed {action_key.replace('_', ' ')} on {len(sel_cols)} column(s).", "✅"
+                        )
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error: {e}")
@@ -178,13 +182,17 @@ def _render_recommendations(cdf, conversion_threshold, missing_threshold, numeri
                     try:
                         _snap = snapshot()
                         if action_key == "drop_duplicates":
-                            st.session_state.current_df = drop_duplicate_rows(cdf)
+                            with st.spinner("Removing duplicate rows..."):
+                                tmp = drop_duplicate_rows(cdf)
+                            st.session_state.current_df = tmp
                             commit_history(f"Fix: {action_key}", _snap)
-                            st.session_state.last_success_msg = "Duplicate rows removed."
+                            st.session_state["_toast"] = ("Duplicate rows removed.", "✅")
                         elif action_key == "drop_dup_cols":
-                            st.session_state.current_df = drop_duplicate_columns(cdf)
+                            with st.spinner("Removing duplicate columns..."):
+                                tmp = drop_duplicate_columns(cdf)
+                            st.session_state.current_df = tmp
                             commit_history(f"Fix: {action_key}", _snap)
-                            st.session_state.last_success_msg = "Duplicate columns removed."
+                            st.session_state["_toast"] = ("Duplicate columns removed.", "✅")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error: {e}")
@@ -194,7 +202,7 @@ def _render_recommendations(cdf, conversion_threshold, missing_threshold, numeri
     if st.button("Auto-Fix All Issues", key="auto_fix_all", type="primary", use_container_width=True):
         try:
             _snap = snapshot()
-            with st.spinner("Running full pipeline..."):
+            with st.spinner("Running full auto-fix pipeline..."):
                 tmp = stripping_whitespace(cdf)
                 tmp = drop_duplicate_rows(tmp)
                 tmp = drop_duplicate_columns(tmp)
@@ -204,7 +212,7 @@ def _render_recommendations(cdf, conversion_threshold, missing_threshold, numeri
             st.session_state.current_df = tmp
             commit_history("Auto-Fix All", _snap)
             st.session_state.selected_columns = {}
-            st.session_state.last_success_msg = "All issues fixed automatically."
+            st.session_state["_toast"] = ("All issues fixed automatically.", "✅")
             st.rerun()
         except Exception as e:
             st.error(f"Error: {e}")
@@ -212,9 +220,6 @@ def _render_recommendations(cdf, conversion_threshold, missing_threshold, numeri
 
 def render(tab, cdf, conversion_threshold, missing_threshold, numeric_strategy, df_key=""):
     with tab:
-        # recommendations are expensive so they only run when the user asks for them
-        # the scan button sets a session state flag that persists across reruns
-        # once scanned the results stay visible until the df changes
         scan_key = f"rec_scanned_{df_key}"
 
         if not st.session_state.get(scan_key):
@@ -230,4 +235,3 @@ def render(tab, cdf, conversion_threshold, missing_threshold, numeric_strategy, 
             if st.button("Re-scan", key="rec_rescan_btn", use_container_width=True):
                 st.session_state[scan_key] = False
                 st.rerun()
-

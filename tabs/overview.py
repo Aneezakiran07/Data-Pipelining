@@ -65,12 +65,10 @@ def _render_quality_score(cdf, df_key):
 
 def render(tab, cdf, stats, orig_stats, file_id=None, df_key=""):
     with tab:
-        # large file warning banner shown when load_file detected downcasting was applied
         large_warn = st.session_state.get("_large_file_warning")
         if large_warn:
             st.warning(large_warn)
 
-        # sampled analysis note shown on large files so user knows stats are estimated
         if stats.get("is_large"):
             st.info(
                 f"This file has {stats['rows']:,} rows. "
@@ -102,23 +100,29 @@ def render(tab, cdf, stats, orig_stats, file_id=None, df_key=""):
         st.subheader("Data Preview")
         total_rows = len(cdf)
 
-        # cap the preview slider max at 200 on large files to avoid rendering lag
         if stats.get("is_large"):
             max_preview = 200
             default_preview = 20
         else:
-            max_preview = min(50, total_rows)
-            default_preview = min(10, total_rows)
+            # cap at 50 but never go below 1
+            max_preview = max(1, min(50, total_rows))
+            default_preview = max(1, min(10, total_rows))
 
-        n_prev = st.slider(
-            "Rows to display",
-            min(5, total_rows),
-            max(min(5, total_rows), max_preview),
-            default_preview,
-            key="prev_slider",
-        )
+        # slider requires min < max, so only render it when there is more than one choice
+        if max_preview > 1:
+            n_prev = st.slider(
+                "Rows to display",
+                1,
+                max_preview,
+                default_preview,
+                key="prev_slider",
+            )
+        else:
+            # single row file: skip the slider entirely
+            n_prev = 1
+
         if total_rows < 50:
-            st.caption(f"File has {total_rows} rows.")
+            st.caption(f"File has {total_rows} row{'s' if total_rows != 1 else ''}.")
         st.dataframe(cdf.head(n_prev), use_container_width=True)
 
         st.divider()
@@ -135,3 +139,4 @@ def render(tab, cdf, stats, orig_stats, file_id=None, df_key=""):
             )
         st.caption("Download and reset options are in the History and Export tab.")
 
+        

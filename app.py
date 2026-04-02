@@ -1,4 +1,5 @@
 from dotenv import load_dotenv
+from state import init_state, maybe_reset_on_new_upload, render_sidebar, resolve_upload, handle_resume_loading_screen
 load_dotenv()
 
 import numpy as np
@@ -47,6 +48,8 @@ missing_threshold, numeric_strategy, conversion_threshold, mode = render_sidebar
 upload.render(tab_upload)
 
 uploaded = st.session_state.get("uploader")
+if handle_resume_loading_screen():
+    st.stop()
 
 if uploaded is None:
     render_guide(tab_guide)
@@ -129,4 +132,4 @@ else:
     except Exception as e:
         st.error(f"Error reading the file: {e}")
         st.info("Make sure your file is a valid CSV or Excel format.")
-3
+

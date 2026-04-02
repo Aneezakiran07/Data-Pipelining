@@ -76,8 +76,10 @@ def maybe_reset_on_new_upload(file_id):
         st.rerun()
 
 
-@st.dialog("Resume your previous session?")
+@st.dialog("Resume your previous session?", dismissible=False)
 def _show_resume_dialog(stable_key: str, saved_info: dict):
+    # dismissible=False removes the X button and disables backdrop click
+    # so the user must pick one of the two buttons before anything else happens
     from session_persist import format_saved_time
     saved_ago = format_saved_time(saved_info["saved_at"])
     n_steps = len(saved_info.get("history", []))
@@ -91,26 +93,34 @@ def _show_resume_dialog(stable_key: str, saved_info: dict):
         if st.button("Continue where I left off", type="primary", use_container_width=True):
             st.session_state["_resume_choice"] = "continue"
             st.session_state["_resume_stable_key"] = stable_key
-            # store label so app.py can show it as a spinner on the next render
+            # two pass loading: first rerun shows the spinner, second runs init_state
+            st.session_state["_resume_loading"] = True
             st.session_state["_resume_loading_msg"] = "Loading your previous session..."
             st.rerun(scope="app")
     with col2:
         if st.button("Start fresh", use_container_width=True):
             st.session_state["_resume_choice"] = "fresh"
             st.session_state["_resume_stable_key"] = stable_key
+            st.session_state["_resume_loading"] = True
             st.session_state["_resume_loading_msg"] = "Starting a fresh session..."
             st.rerun(scope="app")
 
 
-def show_resume_spinner_if_pending():
+def handle_resume_loading_screen():
     """
-    Call this in app.py right before the init_state call inside the spinner block.
-    Renders an info banner while init_state is running so the page is not blank.
-    Cleared inside init_state once loading finishes.
+    Call this in app.py before the uploaded file block, at the top level.
+    If _resume_loading is True this renders a full page spinner and triggers
+    a second rerun so init_state runs on a clean pass after the spinner is visible.
+    Returns True if the loading screen is active so app.py can skip the rest.
     """
-    msg = st.session_state.get("_resume_loading_msg")
-    if msg:
-        st.info(msg)
+    if not st.session_state.get("_resume_loading"):
+        return False
+
+    msg = st.session_state.get("_resume_loading_msg", "Loading...")
+    with st.spinner(msg):
+        # clear the flag so the next rerun proceeds to init_state normally
+        st.session_state["_resume_loading"] = False
+        st.rerun()
 
 
 def init_state(df, load_key, file_bytes: bytes = b"", filename: str = ""):
@@ -128,8 +138,6 @@ def init_state(df, load_key, file_bytes: bytes = b"", filename: str = ""):
     if st.session_state.get("state_key_id") == state_key:
         st.session_state["file_just_loaded"] = False
         st.session_state["current_df_key"] = make_df_key(st.session_state.current_df)
-        # clear loading message once state is confirmed ready
-        st.session_state.pop("_resume_loading_msg", None)
         return
 
     cleanup_old_sessions()
@@ -237,5 +245,4 @@ def col_popover(section, available_cols):
         for c in available_cols:
             st.checkbox(c, key=f"_vc_{section}_{c}", on_change=_make_col_handler(section, c))
     return n
-
 
