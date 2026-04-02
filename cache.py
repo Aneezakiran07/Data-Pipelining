@@ -189,7 +189,7 @@ def get_analysis_and_recommendations(df_key: str, df: pd.DataFrame, conversion_t
         "sample_size": len(sample),
     }
 
-    currency_pattern = r'[$\u20ac\xa3\xa5\u20b9\u20bd\u20ba\u20a9\u0e3f]|(USD|EUR|GBP|JPY|CNY|INR|PKR)'
+    currency_pattern = r'[$€£¥₹₽₺₩฿]|(USD|EUR|GBP|JPY|CNY|INR|PKR)'
 
     # word-boundary duration pattern so single letters like h inside names do not match
     duration_pattern = r"\b(hrs?|hours?|mins?|minutes?|secs?|seconds?)\b"
@@ -369,7 +369,7 @@ def get_type_suggestions(df_key: str, df: pd.DataFrame):
     sample = _sample_for_analysis(df)
 
     email_pattern = r"^[\w\.\+\-]+@[\w\-]+\.[a-zA-Z]{2,}$"
-    currency_pattern = r'[$\u20ac\xa3\xa5\u20b9\u20bd\u20ba\u20a9\u0e3f]|(USD|EUR|GBP|JPY|CNY|INR|PKR|Rs\.?)'
+    currency_pattern = r'[$€£¥₹₽₺₩฿]|(USD|EUR|GBP|JPY|CNY|INR|PKR)'
     bool_values = {"true", "false", "yes", "no", "1", "0", "y", "n"}
 
     # word-boundary duration pattern so single letters like h inside names do not match
