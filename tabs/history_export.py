@@ -8,14 +8,13 @@ from pipeline import (
     redo_action,
 )
 from reporting import build_report_pdf
-from state import show_msg
+
 
 def _render_reset():
     st.subheader("Reset Data")
     st.warning("This will discard all cleaning and restore the original uploaded file.")
     if st.button("Reset to Original Data", key="reset_orig", use_container_width=True):
-        # shows spinner while restoring data
-        with st.spinner("Restoring original data please wait..."):
+        with st.spinner("Restoring original data..."):
             persist_key = st.session_state.get("_persist_key")
             if persist_key:
                 try:
@@ -23,14 +22,14 @@ def _render_reset():
                     delete_session(persist_key)
                 except Exception:
                     pass
-
             st.session_state.current_df = st.session_state.original_df.copy()
             st.session_state.selected_columns = {}
             st.session_state.history = []
             st.session_state.redo_stack = []
             st.session_state["history_len"] = st.session_state.get("history_len", 0) + 1
-            st.session_state.last_success_msg = "Data reset to original successfully."
+        st.session_state["_toast"] = ("Data reset to original.", "✅")
         st.rerun()
+
 
 def _render_download(cdf):
     st.subheader("Download Cleaned Data")
@@ -55,8 +54,7 @@ def _render_download(cdf):
 
         if not excel_ready:
             if st.button("Prepare Excel Download", key="prep_xlsx", use_container_width=True):
-                # shows spinner while openpyxl builds the file
-                with st.spinner("Building Excel file please wait..."):
+                with st.spinner(f"Building Excel file across {len(cdf):,} rows..."):
                     buf = io.BytesIO()
                     import pandas as pd
                     with pd.ExcelWriter(buf, engine="openpyxl") as w:
@@ -64,7 +62,7 @@ def _render_download(cdf):
                         st.session_state.original_df.to_excel(w, index=False, sheet_name="Original Data")
                     st.session_state["_excel_bytes"] = buf.getvalue()
                     st.session_state["_excel_cache_key"] = excel_cache_key
-                    st.session_state.last_success_msg = "Excel file prepared successfully."
+                st.session_state["_toast"] = ("Excel file ready to download.", "✅")
                 st.rerun()
         else:
             st.download_button(
@@ -75,6 +73,7 @@ def _render_download(cdf):
                 key="dl_xlsx",
                 use_container_width=True,
             )
+
 
 def _render_history(hist):
     st.subheader("Cleaning History")
@@ -87,46 +86,45 @@ def _render_history(hist):
 
     for i, step in enumerate(reversed(hist)):
         st.write(
-            f" **{len(hist) - i}.** {step['label']} "
-            f"{step['df'].shape} rows by {step['df'].shape[1]} cols"
+            f"**{len(hist) - i}.** {step['label']} "
+            f"— {step['df'].shape[0]} rows by {step['df'].shape[1]} cols"
         )
     st.write("")
 
     redo_stack = st.session_state.get("redo_stack", [])
     if redo_stack:
-        st.write(" **Available to Redo:** ")
+        st.write("**Available to Redo:**")
         for i, step in enumerate(reversed(redo_stack)):
             st.write(
-                f" **Redo {len(redo_stack) - i}.** {step['label']} "
-                f"{step['df'].shape} rows by {step['df'].shape[1]} cols"
+                f"**Redo {len(redo_stack) - i}.** {step['label']} "
+                f"— {step['df'].shape[0]} rows by {step['df'].shape[1]} cols"
             )
         st.write("")
 
     h1, h2, h3 = st.columns(3)
     with h1:
         can_undo = len(hist) > 0
-        if st.button("Undo Last Step", key="undo_btn", disabled=not can_undo, type="primary", use_container_width=True):
-            # shows spinner while undo runs
-            with st.spinner("Undoing last action please wait..."):
+        if st.button("Undo Last Step", key="undo_btn", disabled=not can_undo,
+                     type="primary", use_container_width=True):
+            with st.spinner("Undoing last action..."):
                 label = undo_last()
             if label:
-                st.session_state.last_success_msg = f"Undone: {label}"
+                st.session_state["_toast"] = (f"Undone: {label}", "↩️")
                 st.rerun()
-                
+
     with h2:
         can_redo = len(redo_stack) > 0
-        if st.button("Redo Action", key="redo_btn", disabled=not can_redo, type="primary", use_container_width=True):
-            # shows spinner while redo runs
-            with st.spinner("Redoing action please wait..."):
+        if st.button("Redo Action", key="redo_btn", disabled=not can_redo,
+                     type="primary", use_container_width=True):
+            with st.spinner("Redoing action..."):
                 label = redo_action()
             if label:
-                st.session_state.last_success_msg = f"Redone: {label}"
+                st.session_state["_toast"] = (f"Redone: {label}", "↪️")
                 st.rerun()
 
     with h3:
         if st.button("Clear History", key="clear_hist", use_container_width=True):
-            # shows spinner while history is cleared
-            with st.spinner("Clearing history please wait..."):
+            with st.spinner("Clearing history..."):
                 st.session_state.history = []
                 st.session_state.redo_stack = []
                 persist_key = st.session_state.get("_persist_key")
@@ -136,8 +134,9 @@ def _render_history(hist):
                         delete_session(persist_key)
                     except Exception:
                         pass
-                st.session_state.last_success_msg = "History cleared successfully."
+            st.session_state["_toast"] = ("History cleared.", "🗑️")
             st.rerun()
+
 
 def _render_pipeline_json(hist, settings):
     st.subheader("Save and Reload Pipeline")
@@ -148,7 +147,7 @@ def _render_pipeline_json(hist, settings):
 
     save_col, load_col = st.columns(2)
     with save_col:
-        st.write(" **Save current pipeline** ")
+        st.write("**Save current pipeline**")
         if not hist:
             st.caption("Run at least one cleaning operation to enable saving.")
         else:
@@ -165,17 +164,15 @@ def _render_pipeline_json(hist, settings):
                 st.code(export_pipeline_json(hist), language="json")
 
     with load_col:
-        st.write(" **Reload a saved pipeline** ")
+        st.write("**Reload a saved pipeline**")
         st.caption(
             "Upload a pipeline.json file to replay its steps on the current dataset. "
-            "Steps that require a specific column name that no longer exists will be skipped."
+            "Steps that require a column that no longer exists will be skipped."
         )
 
         uploaded_json = st.file_uploader(
-            "Upload pipeline.json",
-            type=["json"],
-            key="json_uploader",
-            label_visibility="collapsed",
+            "Upload pipeline.json", type=["json"],
+            key="json_uploader", label_visibility="collapsed",
         )
 
         if uploaded_json is not None:
@@ -186,15 +183,12 @@ def _render_pipeline_json(hist, settings):
 
         if uploaded_json is not None and st.session_state.get("_json_bytes"):
             if st.button("Apply pipeline", key="apply_json", type="primary", use_container_width=True):
-                # shows spinner while the pipeline steps are applied
-                with st.spinner("Applying pipeline steps please wait..."):
+                with st.spinner("Applying pipeline steps..."):
                     try:
                         json_content = st.session_state["_json_bytes"]
                         original = st.session_state.current_df.copy()
                         result, applied, skipped = import_pipeline_json(
-                            json_content,
-                            st.session_state.current_df,
-                            settings,
+                            json_content, st.session_state.current_df, settings,
                         )
                         st.session_state.current_df = result
                         st.session_state["history_len"] = st.session_state.get("history_len", 0) + 1
@@ -203,19 +197,20 @@ def _render_pipeline_json(hist, settings):
                         for label in applied:
                             commit_history(f"Replayed: {label}", original)
 
-                        msg_parts = [f"{len(applied)} step(s) applied successfully."]
+                        msg_parts = [f"{len(applied)} step(s) applied."]
                         if skipped:
                             msg_parts.append(
-                                f"{len(skipped)} step(s) skipped (require manual column selection): "
+                                f"{len(skipped)} skipped: "
                                 + ", ".join(skipped[:5])
                                 + ("..." if len(skipped) > 5 else "")
                             )
-                        st.session_state.last_success_msg = " ".join(msg_parts)
+                        st.session_state["_toast"] = (" ".join(msg_parts), "✅")
                         st.session_state.pop("_json_bytes", None)
                         st.session_state.pop("_json_file_key", None)
                     except Exception as e:
                         st.error(f"Could not apply pipeline: {e}")
                 st.rerun()
+
 
 def _render_python_export(hist):
     st.subheader("Export as Python Script")
@@ -237,21 +232,20 @@ def _render_python_export(hist):
     with st.expander("Preview script", expanded=False):
         st.code(script, language="python")
 
+
 def _render_report_pdf(cdf, hist, filename):
     st.subheader("Export Cleaning Report")
     st.caption(
-        "generates a PDF report with a before and after summary, "
-        "column profiles, missing value breakdown, cleaning steps, "
-        "and a sample of the cleaned data."
+        "Generates a PDF with a before and after summary, column profiles, "
+        "missing value breakdown, cleaning steps, and a sample of the cleaned data."
     )
 
     if not hist:
-        st.caption("run at least one cleaning operation to generate a report.")
+        st.caption("Run at least one cleaning operation to generate a report.")
         return
 
     if st.button("Generate Report", key="gen_pdf", type="primary", use_container_width=True):
-        # shows spinner while building the pdf report
-        with st.spinner("Building PDF report please wait..."):
+        with st.spinner(f"Building PDF report across {len(cdf):,} rows..."):
             try:
                 pdf_bytes = build_report_pdf(
                     original_df=st.session_state.original_df,
@@ -261,9 +255,9 @@ def _render_report_pdf(cdf, hist, filename):
                 )
                 st.session_state["_pdf_bytes"] = pdf_bytes
                 st.session_state["_pdf_ready"] = True
-                st.session_state.last_success_msg = "PDF report generated successfully."
+                st.session_state["_toast"] = ("PDF report ready to download.", "✅")
             except Exception as e:
-                st.error(f"could not generate PDF: {e}")
+                st.error(f"Could not generate PDF: {e}")
                 st.session_state["_pdf_ready"] = False
         st.rerun()
 
@@ -277,12 +271,15 @@ def _render_report_pdf(cdf, hist, filename):
             use_container_width=True,
         )
 
+
 def render(tab, cdf, settings, df_key=""):
     filename = settings.get("filename", "dataset")
     with tab:
-        # prints the success message cleanly at the top of the tab
-        show_msg()
-        
+        # fire any pending toast from the previous rerun
+        if "_toast" in st.session_state:
+            msg, icon = st.session_state.pop("_toast")
+            st.toast(msg, icon=icon)
+
         _render_reset()
         st.divider()
         _render_download(cdf)

@@ -20,10 +20,7 @@ from pipeline import commit_history, snapshot
 
 
 def _count_whitespace_changes(before_df, after_df):
-    """
-    Counts how many individual cell values changed after whitespace stripping.
-    Only checks object columns since numeric columns are not affected.
-    """
+    # count cells that changed after whitespace strip
     total = 0
     cols_changed = 0
     for col in before_df.select_dtypes(include="object").columns:
@@ -41,9 +38,7 @@ def _count_whitespace_changes(before_df, after_df):
 
 
 def _count_converted_cols(before_df, after_df):
-    """
-    Counts how many columns changed dtype after smart column cleaner.
-    """
+    # find columns that changed dtype
     changed = []
     for col in before_df.columns:
         if col in after_df.columns:
@@ -53,9 +48,7 @@ def _count_converted_cols(before_df, after_df):
 
 
 def _count_filled_missing(before_df, after_df):
-    """
-    Counts how many missing values were filled and in how many columns.
-    """
+    # count how many nulls were filled
     total_filled = 0
     cols_filled = 0
     for col in before_df.columns:
@@ -80,21 +73,19 @@ def _render_basic_cleaning(cdf):
             try:
                 _snap = snapshot()
                 n_rows = len(cdf)
-                with st.spinner(f"Stripping whitespace across {n_rows:,} rows..."):
+                with st.spinner(f"Scanning {n_rows:,} rows and stripping whitespace..."):
                     result = stripping_whitespace(cdf)
                 total_changed, cols_changed = _count_whitespace_changes(cdf, result)
                 st.session_state.current_df = result
                 commit_history("Strip Whitespace", _snap)
-                if total_changed > 0:
-                    msg = f"Stripped whitespace from {cols_changed} column(s), {total_changed:,} values cleaned."
-                else:
-                    msg = "No whitespace found. Data already clean."
-                st.session_state["_omsg"] = ("ws_btn", msg)
+                msg = (
+                    f"Stripped whitespace from {cols_changed} column(s), {total_changed:,} values cleaned."
+                    if total_changed > 0 else "No whitespace found. Data already clean."
+                )
+                st.session_state["_toast"] = (msg, "✅")
                 st.rerun()
             except Exception as e:
                 st.error(str(e))
-        if st.session_state.get("_omsg", ("",))[0] == "ws_btn":
-            st.success(st.session_state.pop("_omsg")[1])
 
     with c2:
         if st.button("Drop Duplicate Rows", key="ddr_btn", use_container_width=True,
@@ -107,17 +98,14 @@ def _render_basic_cleaning(cdf):
                 dropped = before - len(result)
                 st.session_state.current_df = result
                 commit_history("Drop Duplicate Rows", _snap)
-                if dropped > 0:
-                    pct = dropped / before * 100
-                    msg = f"Dropped {dropped:,} duplicate rows ({pct:.1f}% of data). {len(result):,} rows remain."
-                else:
-                    msg = "No duplicate rows found."
-                st.session_state["_omsg"] = ("ddr_btn", msg)
+                msg = (
+                    f"Dropped {dropped:,} duplicate rows ({dropped/before*100:.1f}%). {len(result):,} rows remain."
+                    if dropped > 0 else "No duplicate rows found."
+                )
+                st.session_state["_toast"] = (msg, "✅")
                 st.rerun()
             except Exception as e:
                 st.error(str(e))
-        if st.session_state.get("_omsg", ("",))[0] == "ddr_btn":
-            st.success(st.session_state.pop("_omsg")[1])
 
     with c3:
         if st.button("Drop Duplicate Cols", key="ddc_btn", use_container_width=True,
@@ -125,37 +113,33 @@ def _render_basic_cleaning(cdf):
             try:
                 _snap = snapshot()
                 before = cdf.shape[1]
-                with st.spinner("Scanning for duplicate columns..."):
+                with st.spinner(f"Scanning {len(cdf):,} rows for duplicate columns..."):
                     result = drop_duplicate_columns(cdf)
                 dropped = before - result.shape[1]
                 st.session_state.current_df = result
                 commit_history("Drop Duplicate Columns", _snap)
-                if dropped > 0:
-                    msg = f"Dropped {dropped} duplicate column(s). {result.shape[1]} columns remain."
-                else:
-                    msg = "No duplicate columns found."
-                st.session_state["_omsg"] = ("ddc_btn", msg)
+                msg = (
+                    f"Dropped {dropped} duplicate column(s). {result.shape[1]} columns remain."
+                    if dropped > 0 else "No duplicate columns found."
+                )
+                st.session_state["_toast"] = (msg, "✅")
                 st.rerun()
             except Exception as e:
                 st.error(str(e))
-        if st.session_state.get("_omsg", ("",))[0] == "ddc_btn":
-            st.success(st.session_state.pop("_omsg")[1])
 
     with c4:
         if st.button("Clean String Edges", key="cse_btn", use_container_width=True,
                      help="Removes unwanted special characters from the start and end of text values."):
             try:
                 _snap = snapshot()
-                with st.spinner(f"Cleaning string edges across {len(cdf):,} rows..."):
+                with st.spinner(f"Scanning {len(cdf):,} rows and cleaning string edges..."):
                     result = clean_string_edges(cdf, threshold=0.7)
                 st.session_state.current_df = result
                 commit_history("Clean String Edges", _snap)
-                st.session_state["_omsg"] = ("cse_btn", "String edges cleaned.")
+                st.session_state["_toast"] = ("String edges cleaned.", "✅")
                 st.rerun()
             except Exception as e:
                 st.error(str(e))
-        if st.session_state.get("_omsg", ("",))[0] == "cse_btn":
-            st.success(st.session_state.pop("_omsg")[1])
 
 
 def _render_advanced_cleaning(cdf, missing_threshold, numeric_strategy, conversion_threshold):
@@ -167,21 +151,19 @@ def _render_advanced_cleaning(cdf, missing_threshold, numeric_strategy, conversi
                      help="Auto-detects and converts columns that look like currency, percentages, units, or durations."):
             try:
                 _snap = snapshot()
-                with st.spinner(f"Scanning {cdf.shape[1]} columns across {len(cdf):,} rows..."):
+                with st.spinner(f"Scanning {len(cdf):,} rows across {cdf.shape[1]} columns..."):
                     result = smart_column_cleaner(cdf, conversion_threshold=conversion_threshold)
                 converted_cols = _count_converted_cols(cdf, result)
                 st.session_state.current_df = result
                 commit_history("Smart Column Cleaner", _snap)
-                if converted_cols:
-                    msg = f"Converted {len(converted_cols)} column(s): {', '.join(converted_cols[:5])}{'...' if len(converted_cols) > 5 else ''}."
-                else:
-                    msg = "No columns needed conversion."
-                st.session_state["_omsg"] = ("scc_btn", msg)
+                msg = (
+                    f"Converted {len(converted_cols)} column(s): {', '.join(converted_cols[:5])}{'...' if len(converted_cols) > 5 else ''}."
+                    if converted_cols else "No columns needed conversion."
+                )
+                st.session_state["_toast"] = (msg, "✅")
                 st.rerun()
             except Exception as e:
                 st.error(str(e))
-        if st.session_state.get("_omsg", ("",))[0] == "scc_btn":
-            st.success(st.session_state.pop("_omsg")[1])
 
     with c2:
         if st.button("Handle Missing Values", key="hmv_btn", use_container_width=True,
@@ -195,7 +177,7 @@ def _render_advanced_cleaning(cdf, missing_threshold, numeric_strategy, conversi
                     "mice": "MICE imputation",
                     "fast": "mean imputation",
                 }.get(numeric_strategy, numeric_strategy)
-                with st.spinner(f"Filling {total_missing:,} missing values using {strategy_label}..."):
+                with st.spinner(f"Scanning {len(cdf):,} rows — filling {total_missing:,} missing values using {strategy_label}..."):
                     result = missing_value_handler(
                         cdf, threshold=missing_threshold, numeric_strategy=numeric_strategy
                     )
@@ -209,12 +191,10 @@ def _render_advanced_cleaning(cdf, missing_threshold, numeric_strategy, conversi
                 if dropped_cols > 0:
                     parts.append(f"dropped {dropped_cols} column(s) above missing threshold")
                 msg = (", ".join(parts) + ".").capitalize() if parts else "No missing values found."
-                st.session_state["_omsg"] = ("hmv_btn", msg)
+                st.session_state["_toast"] = (msg, "✅")
                 st.rerun()
             except Exception as e:
                 st.error(str(e))
-        if st.session_state.get("_omsg", ("",))[0] == "hmv_btn":
-            st.success(st.session_state.pop("_omsg")[1])
 
 
 def _render_find_replace(cdf, all_cols):
@@ -223,14 +203,8 @@ def _render_find_replace(cdf, all_cols):
     with fr1:
         fr_col = st.selectbox("Column", all_cols, key="fr_col")
     with fr2:
-        fr_regex = st.checkbox(
-            "Use Regex",
-            key="fr_regex",
-            help=(
-                "Leave off for simple text replacements like swapping N/A with nothing. "
-                "Turn on when you need patterns such as removing all digits or matching currency symbols."
-            ),
-        )
+        fr_regex = st.checkbox("Use Regex", key="fr_regex",
+                               help="Leave off for simple replacements. Turn on for patterns like removing digits.")
     fr3, fr4, fr5 = st.columns([2, 2, 1])
     with fr3:
         fr_find = st.text_input("Find", key="fr_find", placeholder="e.g. N/A")
@@ -244,18 +218,18 @@ def _render_find_replace(cdf, all_cols):
             try:
                 _snap = snapshot()
                 before_vals = cdf[fr_col].copy()
-                result = find_and_replace(cdf, fr_col, fr_find, fr_replace, fr_regex)
-                after_vals = result[fr_col]
-                n_changed = int((before_vals.fillna("").astype(str) != after_vals.fillna("").astype(str)).sum())
+                with st.spinner(f"Searching {len(cdf):,} rows in '{fr_col}'..."):
+                    result = find_and_replace(cdf, fr_col, fr_find, fr_replace, fr_regex)
+                n_changed = int(
+                    (before_vals.fillna("").astype(str) != result[fr_col].fillna("").astype(str)).sum()
+                )
                 st.session_state.current_df = result
                 commit_history(f"Find and Replace in {fr_col}", _snap)
                 msg = f"Replaced {n_changed:,} value(s) in '{fr_col}'." if n_changed else f"No matches found in '{fr_col}'."
-                st.session_state["_omsg"] = ("fr_run", msg)
+                st.session_state["_toast"] = (msg, "✅")
                 st.rerun()
             except Exception as e:
                 st.error(str(e))
-    if st.session_state.get("_omsg", ("",))[0] == "fr_run":
-        st.success(st.session_state.pop("_omsg")[1])
 
 
 def _render_type_override(cdf, all_cols):
@@ -268,11 +242,6 @@ def _render_type_override(cdf, all_cols):
             "Cast to",
             ["string (object)", "integer (int64)", "float (float64)", "datetime", "boolean", "category"],
             key="ov_type",
-            help=(
-                "string is plain text. integer is whole numbers. float is decimals. "
-                "datetime is dates and times. boolean is true or false. "
-                "category is a fixed set of labels that saves memory."
-            ),
         )
     with to3:
         st.write("")
@@ -280,44 +249,39 @@ def _render_type_override(cdf, all_cols):
         if st.button("Apply", key="ov_apply", type="primary", use_container_width=True):
             try:
                 _snap = snapshot()
-                tmp = cdf.copy()
-                cd = tmp[ov_col]
-                if ov_type == "string (object)":
-                    tmp[ov_col] = cd.astype(str)
-                elif ov_type == "integer (int64)":
-                    tmp[ov_col] = pd.to_numeric(cd, errors="coerce").astype("Int64")
-                elif ov_type == "float (float64)":
-                    tmp[ov_col] = pd.to_numeric(cd, errors="coerce")
-                elif ov_type == "datetime":
-                    tmp[ov_col] = pd.to_datetime(cd, errors="coerce")
-                elif ov_type == "boolean":
-                    tmp[ov_col] = cd.astype(str).str.lower().map(
-                        {"true": True, "1": True, "yes": True,
-                         "false": False, "0": False, "no": False}
-                    )
-                elif ov_type == "category":
-                    tmp[ov_col] = cd.astype("category")
-
+                with st.spinner(f"Casting '{ov_col}' to {ov_type} across {len(cdf):,} rows..."):
+                    tmp = cdf.copy()
+                    cd = tmp[ov_col]
+                    if ov_type == "string (object)":
+                        tmp[ov_col] = cd.astype(str)
+                    elif ov_type == "integer (int64)":
+                        tmp[ov_col] = pd.to_numeric(cd, errors="coerce").astype("Int64")
+                    elif ov_type == "float (float64)":
+                        tmp[ov_col] = pd.to_numeric(cd, errors="coerce")
+                    elif ov_type == "datetime":
+                        tmp[ov_col] = pd.to_datetime(cd, errors="coerce")
+                    elif ov_type == "boolean":
+                        tmp[ov_col] = cd.astype(str).str.lower().map(
+                            {"true": True, "1": True, "yes": True,
+                             "false": False, "0": False, "no": False}
+                        )
+                    elif ov_type == "category":
+                        tmp[ov_col] = cd.astype("category")
                 failed = int(tmp[ov_col].isna().sum()) - int(cd.isna().sum())
                 st.session_state.current_df = tmp
                 commit_history(f"Type Override: {ov_col} -> {ov_type}", _snap)
                 msg = f"Column '{ov_col}' cast to {ov_type}."
                 if failed > 0:
                     msg += f" {failed:,} value(s) could not be converted and are now null."
-                st.session_state["_omsg"] = ("ov_apply", msg)
+                st.session_state["_toast"] = (msg, "✅")
                 st.rerun()
             except Exception as e:
                 st.error(str(e))
-    if st.session_state.get("_omsg", ("",))[0] == "ov_apply":
-        st.success(st.session_state.pop("_omsg")[1])
 
 
 def _render_split_column(cdf, text_cols, all_cols):
     st.write("**Split Column**")
-    st.caption(
-        "Split one column into several new columns by a delimiter. "
-        "For example split a full name column on a space to get first name and last name."
-    )
+    st.caption("Split one column into several new columns by a delimiter.")
 
     sp1, sp2 = st.columns([3, 1])
     with sp1:
@@ -328,98 +292,59 @@ def _render_split_column(cdf, text_cols, all_cols):
     sp3, sp4 = st.columns([3, 1])
     with sp3:
         sp_names_raw = st.text_input(
-            "Output column names (comma separated)",
-            key="sp_names",
+            "Output column names (comma separated)", key="sp_names",
             placeholder="e.g. first_name, last_name",
-            help=(
-                "Enter one name per resulting column, separated by commas. "
-                "If a row has fewer parts than names, the extra columns get a blank value. "
-                "If you enter fewer names than parts, the extra parts are ignored."
-            ),
         )
     with sp4:
-        sp_keep = st.checkbox(
-            "Keep original",
-            key="sp_keep",
-            help="Keep the source column in the dataframe after splitting.",
-        )
+        sp_keep = st.checkbox("Keep original", key="sp_keep")
 
     sp_names = [n.strip() for n in sp_names_raw.split(",") if n.strip()] if sp_names_raw else []
     sp_ready = bool(sp_col and sp_delim and sp_names)
 
-    if st.button(
-        "Split",
-        key="sp_run",
-        disabled=not sp_ready,
-        type="primary" if sp_ready else "secondary",
-        use_container_width=True,
-    ):
+    if st.button("Split", key="sp_run", disabled=not sp_ready,
+                 type="primary" if sp_ready else "secondary", use_container_width=True):
         try:
             _snap = snapshot()
-            result = split_column(cdf, sp_col, sp_delim, sp_names, keep_original=sp_keep)
+            with st.spinner(f"Splitting '{sp_col}' across {len(cdf):,} rows..."):
+                result = split_column(cdf, sp_col, sp_delim, sp_names, keep_original=sp_keep)
             st.session_state.current_df = result
             commit_history(f"Split column {sp_col} on '{sp_delim}'", _snap)
-            st.session_state["_omsg"] = ("sp_run", f"Split '{sp_col}' into {len(sp_names)} column(s).")
+            st.session_state["_toast"] = (f"Split '{sp_col}' into {len(sp_names)} column(s).", "✅")
             st.rerun()
         except Exception as e:
             st.error(str(e))
 
-    if st.session_state.get("_omsg", ("",))[0] == "sp_run":
-        st.success(st.session_state.pop("_omsg")[1])
-
 
 def _render_merge_columns(cdf, all_cols):
     st.write("**Merge Columns**")
-    st.caption(
-        "Concatenate two or more columns into a single new column. "
-        "For example combine city and country columns into one address column."
-    )
+    st.caption("Concatenate two or more columns into a single new column.")
 
     mg1, mg2 = st.columns([3, 1])
     with mg1:
-        mg_cols = st.multiselect(
-            "Columns to merge (select two or more in order)",
-            all_cols,
-            key="mg_cols",
-        )
+        mg_cols = st.multiselect("Columns to merge (select two or more in order)", all_cols, key="mg_cols")
     with mg2:
-        mg_sep = st.text_input("Separator", value=" ", key="mg_sep",
-                               help="The string placed between each column value.")
+        mg_sep = st.text_input("Separator", value=" ", key="mg_sep")
 
     mg3, mg4 = st.columns([3, 1])
     with mg3:
         mg_new = st.text_input("New column name", key="mg_new", placeholder="e.g. full_address")
     with mg4:
-        mg_keep = st.checkbox(
-            "Keep originals",
-            key="mg_keep",
-            help="Keep the source columns after merging.",
-        )
+        mg_keep = st.checkbox("Keep originals", key="mg_keep")
 
     mg_ready = len(mg_cols) >= 2 and bool(mg_new and mg_new.strip())
 
-    if st.button(
-        "Merge",
-        key="mg_run",
-        disabled=not mg_ready,
-        type="primary" if mg_ready else "secondary",
-        use_container_width=True,
-    ):
+    if st.button("Merge", key="mg_run", disabled=not mg_ready,
+                 type="primary" if mg_ready else "secondary", use_container_width=True):
         try:
             _snap = snapshot()
-            result = merge_columns(cdf, mg_cols, mg_new.strip(), mg_sep, keep_originals=mg_keep)
+            with st.spinner(f"Merging {len(mg_cols)} columns across {len(cdf):,} rows..."):
+                result = merge_columns(cdf, mg_cols, mg_new.strip(), mg_sep, keep_originals=mg_keep)
             st.session_state.current_df = result
             commit_history(f"Merge columns into {mg_new.strip()}", _snap)
-            st.session_state["_omsg"] = (
-                "mg_run",
-                f"Merged {len(mg_cols)} columns into '{mg_new.strip()}'.",
-            )
+            st.session_state["_toast"] = (f"Merged {len(mg_cols)} columns into '{mg_new.strip()}'.", "✅")
             st.rerun()
         except Exception as e:
             st.error(str(e))
-
-    if st.session_state.get("_omsg", ("",))[0] == "mg_run":
-        st.success(st.session_state.pop("_omsg")[1])
 
 
 def _render_rename_columns(cdf, all_cols):
@@ -436,11 +361,8 @@ def _render_rename_columns(cdf, all_cols):
     })
 
     edited = st.data_editor(
-        rename_df,
-        use_container_width=True,
-        hide_index=True,
-        disabled=["Current name"],
-        key="rename_editor",
+        rename_df, use_container_width=True, hide_index=True,
+        disabled=["Current name"], key="rename_editor",
         column_config={
             "Current name": st.column_config.TextColumn("Current name", disabled=True),
             "New name": st.column_config.TextColumn("New name"),
@@ -452,50 +374,41 @@ def _render_rename_columns(cdf, all_cols):
 
     rn1, rn2 = st.columns([3, 1])
     with rn1:
-        if changes:
-            st.caption(f"{len(changes)} column(s) will be renamed.")
-        else:
-            st.caption("No changes detected. Edit the New name column above.")
+        st.caption(f"{len(changes)} column(s) will be renamed." if changes else "No changes detected.")
     with rn2:
-        if st.button(
-            "Apply",
-            key="rn_apply",
-            disabled=not changes,
-            type="primary" if changes else "secondary",
-            use_container_width=True,
-        ):
+        if st.button("Apply", key="rn_apply", disabled=not changes,
+                     type="primary" if changes else "secondary", use_container_width=True):
             try:
                 _snap = snapshot()
-                result = rename_columns(cdf, rename_map)
+                with st.spinner(f"Renaming {len(changes)} column(s)..."):
+                    result = rename_columns(cdf, rename_map)
                 st.session_state.current_df = result
                 st.session_state.rename_state = {}
                 commit_history(f"Rename {len(changes)} column(s)", _snap)
-                st.session_state["_omsg"] = ("rn_apply", f"Renamed {len(changes)} column(s).")
+                st.session_state["_toast"] = (f"Renamed {len(changes)} column(s).", "✅")
                 st.rerun()
             except Exception as e:
                 st.error(str(e))
-
-    if st.session_state.get("_omsg", ("",))[0] == "rn_apply":
-        st.success(st.session_state.pop("_omsg")[1])
 
 
 def _render_type_guesser(cdf, df_key=""):
     st.write("**Data Type Guesser**")
     st.caption(
-        "Scans every column and suggests the correct type based on what the values actually look like. "
+        "Scans every column and suggests the correct type based on what the values look like. "
         "Select the suggestions you want to apply then press Apply Selected."
     )
 
-    # progress bar is real here because get_type_suggestions loops per column
-    # we replicate the loop with a bar so user sees actual per column progress
+    # real per column progress since get_type_suggestions loops column by column
     if st.session_state.get(f"_tg_loading_{df_key}"):
         cols = list(cdf.columns)
-        bar = st.progress(0, text="Scanning columns...")
-        suggestions = []
+        bar = st.progress(0, text=f"Scanning {len(cdf):,} rows — checking column 1 of {len(cols)}...")
         from cache import get_type_suggestions
         all_suggestions = get_type_suggestions(df_key, cdf)
         for i, col in enumerate(cols):
-            bar.progress((i + 1) / len(cols), text=f"Scanned {col}")
+            bar.progress(
+                (i + 1) / len(cols),
+                text=f"Scanning {len(cdf):,} rows — checked {col} ({i+1}/{len(cols)})"
+            )
         bar.empty()
         st.session_state[f"_tg_suggestions_{df_key}"] = all_suggestions
         st.session_state[f"_tg_loading_{df_key}"] = False
@@ -532,12 +445,8 @@ def _render_type_guesser(cdf, df_key=""):
             "Sample Values": s["sample"],
         })
 
-    display_df = pd.DataFrame(rows)
-
     edited = st.data_editor(
-        display_df,
-        use_container_width=True,
-        hide_index=True,
+        pd.DataFrame(rows), use_container_width=True, hide_index=True,
         disabled=["Column", "Current Type", "Suggested Type", "Confidence", "Reason", "Sample Values"],
         column_config={
             "Apply": st.column_config.CheckboxColumn("Apply", default=True),
@@ -551,29 +460,22 @@ def _render_type_guesser(cdf, df_key=""):
 
     tg1, tg2, tg3 = st.columns([3, 1, 1])
     with tg1:
-        if n_selected:
-            st.caption(f"{n_selected} suggestion(s) selected. Press Apply to convert.")
-        else:
-            st.caption("Tick at least one suggestion to enable Apply.")
+        st.caption(
+            f"{n_selected} suggestion(s) selected. Press Apply to convert."
+            if n_selected else "Tick at least one suggestion to enable Apply."
+        )
     with tg2:
-        if st.button(
-            "Apply Selected",
-            key="tg_apply",
-            disabled=n_selected == 0,
-            type="primary" if n_selected else "secondary",
-            use_container_width=True,
-        ):
+        if st.button("Apply Selected", key="tg_apply", disabled=n_selected == 0,
+                     type="primary" if n_selected else "secondary", use_container_width=True):
             try:
                 _snap = snapshot()
-                result, applied = apply_type_suggestions(cdf, selected)
+                with st.spinner(f"Converting {n_selected} column(s) across {len(cdf):,} rows..."):
+                    result, applied = apply_type_suggestions(cdf, selected)
                 st.session_state.current_df = result
                 st.session_state.type_guesser_selected = {}
                 st.session_state.pop(f"_tg_suggestions_{df_key}", None)
                 commit_history(f"Type Guesser: fixed {len(applied)} column(s)", _snap)
-                st.session_state["_omsg"] = (
-                    "tg_apply",
-                    f"Converted {len(applied)} column(s): {', '.join(applied)}.",
-                )
+                st.session_state["_toast"] = (f"Converted {len(applied)} column(s): {', '.join(applied)}.", "✅")
                 st.rerun()
             except Exception as e:
                 st.error(str(e))
@@ -582,14 +484,11 @@ def _render_type_guesser(cdf, df_key=""):
             st.session_state.pop(f"_tg_suggestions_{df_key}", None)
             st.rerun()
 
-    if st.session_state.get("_omsg", ("",))[0] == "tg_apply":
-        st.success(st.session_state.pop("_omsg")[1])
-
 
 def _render_ai_cleaner(cdf):
     st.write("**AI Cleaner**")
     st.caption(
-        "Describe what you want to do in plain English. Try to be as specific as possible.  "
+        "Describe what you want to do in plain English. "
         "Gemini generates the code and shows it to you before running anything."
     )
     render_nl_cleaner(cdf)
@@ -598,6 +497,11 @@ def _render_ai_cleaner(cdf):
 def render(tab, cdf, all_cols, missing_threshold, numeric_strategy, conversion_threshold, df_key=""):
     with tab:
         st.subheader("Manual Cleaning Operations")
+
+        # fire any pending toast from the previous rerun
+        if "_toast" in st.session_state:
+            msg, icon = st.session_state.pop("_toast")
+            st.toast(msg, icon=icon)
 
         with st.expander("AI Cleaner: describe what you want in plain English", expanded=False):
             _render_ai_cleaner(cdf)
@@ -625,4 +529,3 @@ def render(tab, cdf, all_cols, missing_threshold, numeric_strategy, conversion_t
 
         st.divider()
         _render_type_guesser(cdf, df_key)
-

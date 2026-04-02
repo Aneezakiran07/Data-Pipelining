@@ -78,11 +78,6 @@ def maybe_reset_on_new_upload(file_id):
 
 @st.dialog("Resume your previous session?")
 def _show_resume_dialog(stable_key: str, saved_info: dict):
-    """
-    Dialog shown when a saved session is found for the uploaded file.
-    User picks continue or start fresh. The choice is written to session
-    state and the dialog closes via st.rerun so normal init can proceed.
-    """
     from session_persist import format_saved_time
     saved_ago = format_saved_time(saved_info["saved_at"])
     n_steps = len(saved_info.get("history", []))
@@ -96,29 +91,16 @@ def _show_resume_dialog(stable_key: str, saved_info: dict):
         if st.button("Continue where I left off", type="primary", use_container_width=True):
             st.session_state["_resume_choice"] = "continue"
             st.session_state["_resume_stable_key"] = stable_key
-            st.rerun()
+            # scope app breaks out of dialog context, scoped rerun rerenders inside dialog
+            st.rerun(scope="app")
     with col2:
         if st.button("Start fresh", use_container_width=True):
             st.session_state["_resume_choice"] = "fresh"
             st.session_state["_resume_stable_key"] = stable_key
-            st.rerun()
+            st.rerun(scope="app")
 
 
 def init_state(df, load_key, file_bytes: bytes = b"", filename: str = ""):
-    """
-    Initialises session state for a loaded file.
-
-    stable_key is built from filename plus file size so it survives page reloads.
-    Streamlit file_id changes on every reload so it is only used for the in-memory
-    load_key, never for the on-disk session key.
-
-    Flow:
-    1. If this load_key is already initialised just sync df_key and return.
-    2. If a persisted session exists on disk and user has not yet been asked
-       show the resume dialog and halt further init until they choose.
-    3. If user chose continue restore from disk.
-    4. If user chose fresh or no saved session exists init from scratch.
-    """
     from session_persist import (
         cleanup_old_sessions,
         delete_session,
@@ -238,5 +220,3 @@ def col_popover(section, available_cols):
         for c in available_cols:
             st.checkbox(c, key=f"_vc_{section}_{c}", on_change=_make_col_handler(section, c))
     return n
-
-
