@@ -220,7 +220,8 @@ def _render_recommendations(cdf, conversion_threshold, missing_threshold, numeri
 
 def render(tab, cdf, conversion_threshold, missing_threshold, numeric_strategy, df_key=""):
     with tab:
-        scan_key = f"rec_scanned_{df_key}"
+        # stable key — not tied to df_key so it survives after fixes update current_df
+        scan_key = "rec_scanned"
 
         if not st.session_state.get(scan_key):
             st.subheader("Smart Recommendations")
@@ -233,5 +234,8 @@ def render(tab, cdf, conversion_threshold, missing_threshold, numeric_strategy, 
             _render_recommendations(cdf, conversion_threshold, missing_threshold, numeric_strategy, df_key)
             st.write("")
             if st.button("Re-scan", key="rec_rescan_btn", use_container_width=True):
-                st.session_state[scan_key] = False
+                # stay in scanned state — just bust the analysis cache so
+                # _render_recommendations re-runs the scan immediately on next render
+                from cache import get_analysis_and_recommendations
+                get_analysis_and_recommendations.clear()
                 st.rerun()

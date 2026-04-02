@@ -189,7 +189,11 @@ def get_analysis_and_recommendations(df_key: str, df: pd.DataFrame, conversion_t
         "sample_size": len(sample),
     }
 
-    currency_pattern = r'[$€£¥₹₽₺₩฿]|(USD|EUR|GBP|JPY|CNY|INR|PKR)'
+    currency_pattern = r'[$\u20ac\xa3\xa5\u20b9\u20bd\u20ba\u20a9\u0e3f]|(USD|EUR|GBP|JPY|CNY|INR|PKR)'
+
+    # word-boundary duration pattern so single letters like h inside names do not match
+    duration_pattern = r"\b(hrs?|hours?|mins?|minutes?|secs?|seconds?)\b"
+
     for col in sample.select_dtypes(include="object").columns:
         s_str = sample[col].astype(str)
         if s_str.str.strip().ne(s_str).any():
@@ -206,7 +210,7 @@ def get_analysis_and_recommendations(df_key: str, df: pd.DataFrame, conversion_t
             issues["percentage_cols"].append(col)
         elif non_empty.str.contains(r"\d+\s?(kg|g|cm|mm|km|ml|l|lb)", case=False, regex=True).mean() > conversion_threshold:
             issues["unit_cols"].append(col)
-        elif non_empty.str.contains(r"(h|hr|hour|min|minute|sec|second)", case=False, regex=True).mean() > conversion_threshold:
+        elif non_empty.str.contains(duration_pattern, case=False, regex=True).mean() > conversion_threshold:
             issues["duration_cols"].append(col)
         if (s_str.str.match(r"^\W") | s_str.str.match(r"\W$")).sum() > 0:
             issues["edge_char_cols"].append(col)
@@ -365,8 +369,11 @@ def get_type_suggestions(df_key: str, df: pd.DataFrame):
     sample = _sample_for_analysis(df)
 
     email_pattern = r"^[\w\.\+\-]+@[\w\-]+\.[a-zA-Z]{2,}$"
-    currency_pattern = r'[$€£¥₹₽₺₩฿]|(USD|EUR|GBP|JPY|CNY|INR|PKR|Rs\.?)'
+    currency_pattern = r'[$\u20ac\xa3\xa5\u20b9\u20bd\u20ba\u20a9\u0e3f]|(USD|EUR|GBP|JPY|CNY|INR|PKR|Rs\.?)'
     bool_values = {"true", "false", "yes", "no", "1", "0", "y", "n"}
+
+    # word-boundary duration pattern so single letters like h inside names do not match
+    duration_pattern = r"\b(hrs?|hours?|mins?|minutes?|secs?|seconds?)\b"
 
     suggestions = []
 
@@ -454,7 +461,7 @@ def get_type_suggestions(df_key: str, df: pd.DataFrame):
             continue
 
         duration_match = str_series.str.contains(
-            r"(h|hr|hour|min|minute|sec|second)", case=False, regex=True
+            duration_pattern, case=False, regex=True
         ).mean()
         if duration_match >= 0.6:
             suggestions.append({
@@ -596,7 +603,4 @@ def get_quality_score(df_key: str, df: pd.DataFrame):
                 "detail": f"{avg_invalid_frac*100:.1f}% of text values are placeholder or invalid strings",
             },
         },
-    }
-
-
-
+}
