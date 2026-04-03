@@ -4,13 +4,21 @@ import pandas as pd
 from .basic import checking_valid_input
 
 
-def validate_email_col(df, col, action="flag"):
+def validate_email_col(df, col, action="flag", custom_pattern=""):
     checking_valid_input(df)
     if col not in df.columns:
         raise ValueError(f"Column '{col}' not found")
     df_clean = df.copy()
-    pattern = r"^[\w\.\+\-]+@[\w\-]+\.[a-zA-Z]{2,}$"
-    is_valid = df_clean[col].astype(str).str.strip().str.match(pattern)
+
+    # use custom regex if provided, fall back to standard email pattern
+    pattern = custom_pattern.strip() if custom_pattern and custom_pattern.strip() \
+        else r"^[\w\.\+\-]+@[\w\-]+\.[a-zA-Z]{2,}$"
+
+    try:
+        is_valid = df_clean[col].astype(str).str.strip().str.match(pattern)
+    except Exception:
+        raise ValueError(f"Invalid regex pattern: {pattern}")
+
     if action == "flag":
         df_clean[f"{col}_valid_email"] = is_valid
     elif action == "remove":
@@ -18,38 +26,57 @@ def validate_email_col(df, col, action="flag"):
     return df_clean
 
 
-def validate_phone_col(df, col):
+def validate_phone_col(df, col, default_country_code="1"):
     checking_valid_input(df)
     if col not in df.columns:
         raise ValueError(f"Column '{col}' not found")
     df_clean = df.copy()
+
+    # strip country code of any leading + or spaces the user may have typed
+    cc = default_country_code.strip().lstrip("+").strip() or "1"
+    cc_len = len(cc)
 
     # vectorized: strip all non-digit characters across the whole column at once
     digits = df_clean[col].astype(str).str.replace(r"\D", "", regex=True)
     length = digits.str.len()
 
+    # 10 digits: assume local number, prepend custom country code
+    is_10 = length == 10
+    # 11 digits starting with the country code: already has it
+    is_11_with_cc = (length == (10 + cc_len)) & digits.str.startswith(cc)
+    # anything else with enough digits: just prepend +
+    is_other = (length >= 7) & ~is_10 & ~is_11_with_cc
+
     result = pd.Series(np.nan, index=df_clean.index, dtype=object)
-    result = result.where(~(length == 10), "+1" + digits)
-    result = result.where(~((length == 11) & digits.str.startswith("1")), "+" + digits)
-    result = result.where(~((length >= 7) & ~(length == 10) & ~((length == 11) & digits.str.startswith("1"))), "+" + digits)
+    result = result.where(~is_10, "+" + cc + digits)
+    result = result.where(~is_11_with_cc, "+" + digits)
+    result = result.where(~is_other, "+" + digits)
 
     df_clean[col] = result
     return df_clean
 
 
-def validate_date_col(df, col, output_format="%Y-%m-%d"):
+def validate_date_col(df, col, output_format="%Y-%m-%d", custom_input_format=""):
     checking_valid_input(df)
     if col not in df.columns:
         raise ValueError(f"Column '{col}' not found")
     df_clean = df.copy()
 
-    # vectorized: pd.to_datetime with infer_datetime_format handles the vast
-    # majority of formats in one C-level pass; only unparseable values become NaT
     cleaned = df_clean[col].astype(str).str.strip().replace("", np.nan).replace("nan", np.nan)
-    parsed = pd.to_datetime(cleaned, infer_datetime_format=True, errors="coerce")
 
-    # second pass: try the explicit format list only for rows that failed the
-    # first pass — keeps the fast path fast and still handles edge-case formats
+    # if user gave a custom format try it first before anything else
+    parsed = pd.Series(pd.NaT, index=df_clean.index)
+    if custom_input_format and custom_input_format.strip():
+        parsed = pd.to_datetime(cleaned, format=custom_input_format.strip(), errors="coerce")
+
+    # first pass: fast C-level inference for rows not yet parsed
+    still_unparsed = parsed.isna() & cleaned.notna()
+    if still_unparsed.any():
+        parsed[still_unparsed] = pd.to_datetime(
+            cleaned[still_unparsed], infer_datetime_format=True, errors="coerce"
+        )
+
+    # second pass: explicit format list only for rows that still failed
     failed_mask = parsed.isna() & cleaned.notna()
     if failed_mask.any():
         fmts = [
@@ -87,7 +114,9 @@ def cap_outliers(df, col, method="iqr", action="cap", threshold=1.5):
     if action == "cap":
         df_clean[col] = df_clean[col].clip(lower=lower, upper=upper)
     else:
-        df_clean = df_clean[df_clean[col].isna() | df_clean[col].between(lower, upper)].reset_index(drop=True)
+        df_clean = df_clean[
+            df_clean[col].isna() | df_clean[col].between(lower, upper)
+        ].reset_index(drop=True)
     return df_clean
 
 
@@ -105,3 +134,4 @@ def validate_range(df, col, min_val, max_val, action="flag"):
         df_clean = df_clean[in_range].reset_index(drop=True)
     return df_clean
 
+    
