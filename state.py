@@ -16,6 +16,7 @@ def render_sidebar():
         )
         if mode == "Simple":
             st.caption("Using default settings. Switch to Advanced to unlock extra features.")
+            _render_undo_redo()
             return 0.30, "auto", 0.60, "Simple"
 
         st.subheader("Missing Value Handler")
@@ -40,7 +41,53 @@ def render_sidebar():
         ) / 100
         st.session_state["conversion_threshold_val"] = int(conversion_threshold * 100)
 
+        _render_undo_redo()
+
     return missing_threshold, numeric_strategy, conversion_threshold, "Advanced"
+
+
+def _render_undo_redo():
+    hist = st.session_state.get("history", [])
+    redo = st.session_state.get("redo_stack", [])
+
+    st.divider()
+    st.caption("Quick Actions")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button(
+            "Undo",
+            key="sidebar_undo",
+            disabled=not hist,
+            use_container_width=True,
+            help=f"Undo: {hist[-1]['label']}" if hist else "Nothing to undo",
+        ):
+            from pipeline import undo_last
+            label = undo_last()
+            if label:
+                # no st.rerun here — sidebar runs before current_df exists in app.py
+                # setting the flag lets app.py pick it up and rerun safely
+                st.session_state["_toast"] = (f"Undone: {label}", "✔")
+                st.session_state["_sidebar_action_done"] = True
+
+    with c2:
+        if st.button(
+            "Redo",
+            key="sidebar_redo",
+            disabled=not redo,
+            use_container_width=True,
+            help=f"Redo: {redo[-1]['label']}" if redo else "Nothing to redo",
+        ):
+            from pipeline import redo_action
+            label = redo_action()
+            if label:
+                st.session_state["_toast"] = (f"Redone: {label}", "✔")
+                st.session_state["_sidebar_action_done"] = True
+
+    if hist:
+        st.caption(f"Undo: {hist[-1]['label']}")
+    if redo:
+        st.caption(f"Redo: {redo[-1]['label']}")
 
 
 def resolve_upload(uploaded):
@@ -78,8 +125,6 @@ def maybe_reset_on_new_upload(file_id):
 
 @st.dialog("Resume your previous session?", dismissible=False)
 def _show_resume_dialog(stable_key: str, saved_info: dict):
-    # dismissible=False removes the X button and disables backdrop click
-    # so the user must pick one of the two buttons before anything else happens
     from session_persist import format_saved_time
     saved_ago = format_saved_time(saved_info["saved_at"])
     n_steps = len(saved_info.get("history", []))
@@ -93,7 +138,6 @@ def _show_resume_dialog(stable_key: str, saved_info: dict):
         if st.button("Continue where I left off", type="primary", use_container_width=True):
             st.session_state["_resume_choice"] = "continue"
             st.session_state["_resume_stable_key"] = stable_key
-            # two pass loading: first rerun shows the spinner, second runs init_state
             st.session_state["_resume_loading"] = True
             st.session_state["_resume_loading_msg"] = "Loading your previous session..."
             st.rerun(scope="app")
@@ -107,18 +151,10 @@ def _show_resume_dialog(stable_key: str, saved_info: dict):
 
 
 def handle_resume_loading_screen():
-    """
-    Call this in app.py before the uploaded file block, at the top level.
-    If _resume_loading is True this renders a full page spinner and triggers
-    a second rerun so init_state runs on a clean pass after the spinner is visible.
-    Returns True if the loading screen is active so app.py can skip the rest.
-    """
     if not st.session_state.get("_resume_loading"):
         return False
-
     msg = st.session_state.get("_resume_loading_msg", "Loading...")
     with st.spinner(msg):
-        # clear the flag so the next rerun proceeds to init_state normally
         st.session_state["_resume_loading"] = False
         st.rerun()
 
@@ -182,7 +218,6 @@ def init_state(df, load_key, file_bytes: bytes = b"", filename: str = ""):
                 "file_just_loaded": True,
                 "_persist_key": stable_key,
                 "redo_stack": saved.get("redo_stack", []),
-                # reset scan state so resumed sessions start fresh on recommendations
                 "rec_scanned": False,
             })
             if "val_selected" not in st.session_state:
@@ -210,7 +245,6 @@ def init_state(df, load_key, file_bytes: bytes = b"", filename: str = ""):
         "state_key_id": state_key,
         "file_just_loaded": True,
         "_persist_key": stable_key,
-        # reset scan state on every fresh file load
         "rec_scanned": False,
     })
 
@@ -249,4 +283,3 @@ def col_popover(section, available_cols):
         for c in available_cols:
             st.checkbox(c, key=f"_vc_{section}_{c}", on_change=_make_col_handler(section, c))
     return n
-    
