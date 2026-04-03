@@ -63,20 +63,20 @@ else:
 
         uploaded.seek(0)
 
-        # spinner wraps only the parse and init work
-        # st.rerun is intentionally outside this block so the spinner
-        # has a chance to render before the script reruns
         with st.spinner(f"Loading {uploaded.name}..."):
             file_bytes, selected_sheet = resolve_upload(uploaded)
             load_key = f"{file_id}_{selected_sheet}"
             df = load_file(file_bytes, uploaded.name, load_key, sheet_name=selected_sheet)
             init_state(df, load_key, file_bytes=file_bytes, filename=uploaded.name)
 
-        # init_state calls st.stop() while the resume dialog is open
-        # so current_df will not exist yet in that render pass
-        # everything below is skipped until the user makes a choice and st.rerun fires
         if "current_df" not in st.session_state:
             st.stop()
+
+        # safe to rerun here — init_state has run so current_df exists
+        # sidebar undo/redo sets this flag instead of rerunning from the sidebar
+        # which fires before current_df is set and crashes the tab layout
+        if st.session_state.pop("_sidebar_action_done", False):
+            st.rerun()
 
         cdf = st.session_state.current_df
         df_key = st.session_state.get("current_df_key", make_df_key(cdf))
@@ -124,13 +124,14 @@ else:
             "conversion_threshold": conversion_threshold,
             "filename": uploaded.name,
         }
-        history_export.render(tab_history, cdf, pipeline_settings)
 
-        # ai insights are fetched on demand inside guide.py when the user opens the guide tab
-        # nothing needs to run here at page load time
+        # pass load_key as file_id so history_export can read the ai summary
+        # from the same cache key that ai_insights.py and guide.py write to
+        history_export.render(tab_history, cdf, pipeline_settings, df_key=load_key)
 
     except Exception as e:
         st.error(f"Error reading the file: {e}")
         st.info("Make sure your file is a valid CSV or Excel format.")
 
 
+        

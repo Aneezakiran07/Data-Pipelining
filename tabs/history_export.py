@@ -233,7 +233,7 @@ def _render_python_export(hist):
         st.code(script, language="python")
 
 
-def _render_report_pdf(cdf, hist, filename):
+def _render_report_pdf(cdf, hist, filename, df_key=""):
     st.subheader("Export Cleaning Report")
     st.caption(
         "Generates a PDF with a before and after summary, column profiles, "
@@ -244,6 +244,14 @@ def _render_report_pdf(cdf, hist, filename):
         st.caption("Run at least one cleaning operation to generate a report.")
         return
 
+    # pull ai summary from cache if the user already generated it
+    ai_summary = st.session_state.get(f"ai_insights_{df_key}", {}).get("summary", "")
+
+    if ai_summary:
+        st.caption("AI summary detected — it will be included in the report as an Executive Summary.")
+    else:
+        st.caption("No AI summary found. Generate one in the Overview tab to include it in the report.")
+
     if st.button("Generate Report", key="gen_pdf", type="primary", use_container_width=True):
         with st.spinner(f"Building PDF report across {len(cdf):,} rows..."):
             try:
@@ -252,6 +260,7 @@ def _render_report_pdf(cdf, hist, filename):
                     cleaned_df=cdf,
                     history=hist,
                     filename=filename,
+                    ai_summary=ai_summary,
                 )
                 st.session_state["_pdf_bytes"] = pdf_bytes
                 st.session_state["_pdf_ready"] = True
@@ -284,7 +293,8 @@ def render(tab, cdf, settings, df_key=""):
         st.divider()
         _render_download(cdf)
         st.divider()
-        _render_report_pdf(cdf, st.session_state.get("history", []), filename)
+        # pass df_key so the pdf builder can read the ai summary cache
+        _render_report_pdf(cdf, st.session_state.get("history", []), filename, df_key)
         st.divider()
         _render_history(st.session_state.get("history", []))
         st.divider()

@@ -5,10 +5,9 @@ import numpy as np
 import pandas as pd
 
 
-def build_report_pdf(original_df, cleaned_df, history, filename="dataset"):
-    # builds a full before and after cleaning report as a PDF.
-    # uses only reportlab which ships with most Python environments.
-    # returns the PDF as bytes ready to pass to st.download_button.
+def build_report_pdf(original_df, cleaned_df, history, filename="dataset", ai_summary=""):
+    # builds a full before and after cleaning report as a PDF
+    # returns the PDF as bytes ready to pass to st.download_button
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -114,6 +113,27 @@ def build_report_pdf(original_df, cleaned_df, history, filename="dataset"):
     story.append(Spacer(1, 0.3 * cm))
     story.append(hr())
 
+    # ai executive summary panel — only renders if summary was generated
+    if ai_summary and ai_summary.strip():
+        summary_para = Paragraph(
+            f"<b>AI Summary:</b> {ai_summary.strip()}",
+            style_body,
+        )
+        summary_table = Table(
+            [[summary_para]],
+            colWidths=[25 * cm],
+        )
+        summary_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), LIGHT_BLUE),
+            ("BOX", (0, 0), (-1, -1), 0.5, BLUE),
+            ("LEFTPADDING", (0, 0), (-1, -1), 10),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+            ("TOPPADDING", (0, 0), (-1, -1), 8),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+        ]))
+        story.append(summary_table)
+        story.append(Spacer(1, 0.3 * cm))
+
     # summary metrics
     orig_rows, orig_cols = original_df.shape
     clean_rows, clean_cols = cleaned_df.shape
@@ -189,7 +209,6 @@ def build_report_pdf(original_df, cleaned_df, history, filename="dataset"):
     story.append(Paragraph("first 10 rows of the cleaned dataset.", style_caption))
     sample = cleaned_df.head(10)
 
-    # truncate values for display
     sample_display = sample.copy()
     for col in sample_display.columns:
         sample_display[col] = sample_display[col].astype(str).str[:18]
@@ -198,9 +217,7 @@ def build_report_pdf(original_df, cleaned_df, history, filename="dataset"):
     for _, row in sample_display.iterrows():
         sample_rows.append(row.tolist())
 
-    # compute content-aware column widths
-    # measure the longest value in each column including the header
-    available_width = 25 * cm  # use landscape-style wide area
+    available_width = 25 * cm
     n_cols = len(sample_display.columns)
 
     char_widths = []
@@ -213,7 +230,6 @@ def build_report_pdf(original_df, cleaned_df, history, filename="dataset"):
     total_chars = sum(char_widths)
     col_widths = [max(1.5 * cm, (w / total_chars) * available_width) for w in char_widths]
 
-    # if total exceeds page width, scale down proportionally
     total_w = sum(col_widths)
     if total_w > available_width:
         scale = available_width / total_w
@@ -280,4 +296,3 @@ def _column_profile_table(df, header_color, alt_color, grid_color):
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
     ]))
     return t
-
