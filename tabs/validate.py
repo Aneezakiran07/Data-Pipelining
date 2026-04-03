@@ -4,6 +4,9 @@ from cleaning import cap_outliers, validate_date_col, validate_email_col, valida
 from pipeline import commit_history, snapshot
 from state import col_popover
 
+# default email pattern kept in one place so both the app and exporter agree
+_DEFAULT_EMAIL_PATTERN = r"^[\w\.\+\-]+@[\w\-]+\.[a-zA-Z]{2,}$"
+
 
 def render(tab, cdf, text_cols, num_cols, df_key=""):
     with tab:
@@ -53,12 +56,25 @@ def render(tab, cdf, text_cols, num_cols, df_key=""):
                         _snap = snapshot()
                         cols = st.session_state.val_selected.get("email", [])
                         action = "flag" if "Flag" in ea else "remove"
+
+                        # resolve pattern once so the label and the function agree
+                        pattern_used = custom_email_pattern.strip() or _DEFAULT_EMAIL_PATTERN
+
                         with st.spinner(f"Scanning {len(cdf):,} rows — validating emails in {len(cols)} column(s)..."):
                             tmp = cdf.copy()
                             for c in cols:
-                                tmp = validate_email_col(tmp, c, action, custom_pattern=custom_email_pattern)
+                                tmp = validate_email_col(tmp, c, action, custom_pattern=pattern_used)
+
                         st.session_state.current_df = tmp
-                        commit_history("Validate Email", _snap)
+
+                        # embed col, action, and pattern in the label so the exporter
+                        # can reconstruct the exact script without a separate store
+                        for c in cols:
+                            commit_history(
+                                f"Validate Email|col={c}|action={action}|pattern={pattern_used}",
+                                _snap
+                            )
+
                         st.session_state.val_selected.pop("email", None)
                         st.session_state["_toast"] = (f"Email validation done on {n_em} column(s).", "✔")
                         st.rerun()
@@ -101,12 +117,22 @@ def render(tab, cdf, text_cols, num_cols, df_key=""):
                     try:
                         _snap = snapshot()
                         cols = st.session_state.val_selected.get("phone", [])
+                        cc = phone_cc.strip().lstrip("+").strip() or "1"
+
                         with st.spinner(f"Scanning {len(cdf):,} rows — standardizing phones in {len(cols)} column(s)..."):
                             tmp = cdf.copy()
                             for c in cols:
-                                tmp = validate_phone_col(tmp, c, default_country_code=phone_cc)
+                                tmp = validate_phone_col(tmp, c, default_country_code=cc)
+
                         st.session_state.current_df = tmp
-                        commit_history("Standardize Phone", _snap)
+
+                        # embed col and country code so exporter uses the right values
+                        for c in cols:
+                            commit_history(
+                                f"Standardize Phone|col={c}|cc={cc}",
+                                _snap
+                            )
+
                         st.session_state.val_selected.pop("phone", None)
                         st.session_state["_toast"] = (f"Phone standardized in {n_ph} column(s).", "✔")
                         st.rerun()
@@ -141,9 +167,9 @@ def render(tab, cdf, text_cols, num_cols, df_key=""):
                         "%b = short month name (e.g. Jan)\n"
                         "%B = full month name (e.g. January)\n\n"
                         "Real examples:\n"
-                        "2024.03.07  →  %Y.%m.%d\n"
-                        "07 Mar 2024 14:30  →  %d %b %Y %H:%M\n"
-                        "March 7, 2024  →  %B %d, %Y"
+                        "2024.03.07  ->  %Y.%m.%d\n"
+                        "07 Mar 2024 14:30  ->  %d %b %Y %H:%M\n"
+                        "March 7, 2024  ->  %B %d, %Y"
                     ),
                 )
             with v2:
@@ -156,6 +182,7 @@ def render(tab, cdf, text_cols, num_cols, df_key=""):
                     try:
                         _snap = snapshot()
                         cols = st.session_state.val_selected.get("date", [])
+
                         with st.spinner(f"Scanning {len(cdf):,} rows — formatting dates in {len(cols)} column(s)..."):
                             tmp = cdf.copy()
                             for c in cols:
@@ -164,8 +191,16 @@ def render(tab, cdf, text_cols, num_cols, df_key=""):
                                     output_format=date_fmt,
                                     custom_input_format=custom_date_fmt,
                                 )
+
                         st.session_state.current_df = tmp
-                        commit_history("Standardize Dates", _snap)
+
+                        # embed col, output format, and custom input format per column
+                        for c in cols:
+                            commit_history(
+                                f"Standardize Dates|col={c}|output_fmt={date_fmt}|input_fmt={custom_date_fmt}",
+                                _snap
+                            )
+
                         st.session_state.val_selected.pop("date", None)
                         st.session_state["_toast"] = (f"Dates standardized in {n_dt} column(s).", "✔")
                         st.rerun()
@@ -197,14 +232,23 @@ def render(tab, cdf, text_cols, num_cols, df_key=""):
                         _snap = snapshot()
                         cols = st.session_state.val_selected.get("outlier", [])
                         action_label = "Capping" if o_action == "cap" else "Removing"
+
                         with st.spinner(f"Scanning {len(cdf):,} rows — {action_label.lower()} outliers in {len(cols)} column(s) using {o_method.upper()}..."):
                             before = len(cdf)
                             tmp = cdf.copy()
                             for c in cols:
                                 tmp = cap_outliers(tmp, c, method=o_method, action=o_action, threshold=o_thresh)
+
                         after = len(tmp)
                         st.session_state.current_df = tmp
-                        commit_history("Cap Outliers", _snap)
+
+                        # embed col, method, action, and threshold per column
+                        for c in cols:
+                            commit_history(
+                                f"Cap Outliers|col={c}|method={o_method}|action={o_action}|threshold={o_thresh}",
+                                _snap
+                            )
+
                         st.session_state.val_selected.pop("outlier", None)
                         msg = (
                             f"Outliers capped in {n_out} column(s)."
@@ -237,14 +281,23 @@ def render(tab, cdf, text_cols, num_cols, df_key=""):
                     try:
                         _snap = snapshot()
                         cols = st.session_state.val_selected.get("range", [])
+
                         with st.spinner(f"Scanning {len(cdf):,} rows — checking range [{rng_min}, {rng_max}] in {len(cols)} column(s)..."):
                             before = len(cdf)
                             tmp = cdf.copy()
                             for c in cols:
                                 tmp = validate_range(tmp, c, rng_min, rng_max, rng_act)
+
                         after = len(tmp)
                         st.session_state.current_df = tmp
-                        commit_history("Validate Range", _snap)
+
+                        # embed col, min, max, and action per column
+                        for c in cols:
+                            commit_history(
+                                f"Validate Range|col={c}|min={rng_min}|max={rng_max}|action={rng_act}",
+                                _snap
+                            )
+
                         st.session_state.val_selected.pop("range", None)
                         msg = (
                             f"Range flagged across {n_rng} column(s)."
@@ -255,5 +308,3 @@ def render(tab, cdf, text_cols, num_cols, df_key=""):
                         st.rerun()
                     except Exception as e:
                         st.error(str(e))
-
-                   
