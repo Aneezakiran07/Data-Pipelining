@@ -10,6 +10,43 @@ from pipeline import (
 from reporting import build_report_pdf
 
 
+def _friendly_label(label):
+    # strips pipe metadata from a label and returns a clean readable string
+    # "Validate Email|col=email|action=flag" becomes "Validate Email (col=email, action=flag)"
+    if "|" not in label:
+        return label
+    parts = label.split("|")
+    base = parts[0].strip()
+    meta_parts = [p.strip() for p in parts[1:] if "=" in p]
+    if meta_parts:
+        return f"{base} ({', '.join(meta_parts)})"
+    return base
+
+
+def _render_json_preview(json_str, title="Pipeline Steps", expanded=True):
+    # shows a numbered step list with friendly labels instead of a raw JSON dump
+    # raw JSON is still accessible in a nested expander below the list
+    import json as _json
+    try:
+        payload = _json.loads(json_str)
+        steps = payload.get("steps", [])
+    except Exception:
+        st.warning("Could not parse pipeline JSON for preview.")
+        return
+
+    with st.expander(title, expanded=expanded):
+        if not steps:
+            st.caption("No steps found in this pipeline.")
+        else:
+            for i, entry in enumerate(steps):
+                label = entry.get("label", "")
+                st.write(f"**{i + 1}.** {_friendly_label(label)}")
+
+        # raw JSON still accessible but collapsed so it does not dominate the UI
+        with st.expander("Raw JSON", expanded=False):
+            st.code(json_str, language="json")
+
+
 def _render_reset():
     st.subheader("Reset Data")
     st.warning("This will discard all cleaning and restore the original uploaded file.")
@@ -86,8 +123,8 @@ def _render_history(hist):
 
     for i, step in enumerate(reversed(hist)):
         st.write(
-            f"**{len(hist) - i}.** {step['label']} "
-            f"— {step['df'].shape[0]} rows by {step['df'].shape[1]} cols"
+            f"**{len(hist) - i}.** {_friendly_label(step['label'])} "
+            f"-- {step['df'].shape[0]} rows by {step['df'].shape[1]} cols"
         )
     st.write("")
 
@@ -96,8 +133,8 @@ def _render_history(hist):
         st.write("**Available to Redo:**")
         for i, step in enumerate(reversed(redo_stack)):
             st.write(
-                f"**Redo {len(redo_stack) - i}.** {step['label']} "
-                f"— {step['df'].shape[0]} rows by {step['df'].shape[1]} cols"
+                f"**Redo {len(redo_stack) - i}.** {_friendly_label(step['label'])} "
+                f"-- {step['df'].shape[0]} rows by {step['df'].shape[1]} cols"
             )
         st.write("")
 
@@ -109,7 +146,7 @@ def _render_history(hist):
             with st.spinner("Undoing last action..."):
                 label = undo_last()
             if label:
-                st.session_state["_toast"] = (f"Undone: {label}", "✔")
+                st.session_state["_toast"] = (f"Undone: {_friendly_label(label)}", "✔")
                 st.rerun()
 
     with h2:
@@ -119,7 +156,7 @@ def _render_history(hist):
             with st.spinner("Redoing action..."):
                 label = redo_action()
             if label:
-                st.session_state["_toast"] = (f"Redone: {label}", "✔")
+                st.session_state["_toast"] = (f"Redone: {_friendly_label(label)}", "✔")
                 st.rerun()
 
     with h3:
@@ -146,22 +183,23 @@ def _render_pipeline_json(hist, settings):
     )
 
     save_col, load_col = st.columns(2)
+
     with save_col:
         st.write("**Save current pipeline**")
         if not hist:
             st.caption("Run at least one cleaning operation to enable saving.")
         else:
-            json_bytes = export_pipeline_json(hist).encode("utf-8")
+            json_str = export_pipeline_json(hist)
             st.download_button(
                 "Download pipeline.json",
-                data=json_bytes,
+                data=json_str.encode("utf-8"),
                 file_name="pipeline.json",
                 mime="application/json",
                 key="dl_json",
                 use_container_width=True,
             )
-            with st.expander("Preview JSON", expanded=False):
-                st.code(export_pipeline_json(hist), language="json")
+            # friendly preview on the save side with raw JSON nested inside
+            _render_json_preview(json_str, title="Preview saved pipeline", expanded=False)
 
     with load_col:
         st.write("**Reload a saved pipeline**")
@@ -182,34 +220,87 @@ def _render_pipeline_json(hist, settings):
                 st.session_state["_json_file_key"] = file_key
 
         if uploaded_json is not None and st.session_state.get("_json_bytes"):
+            # auto-expand the preview so the user can see steps before hitting Apply
+            _render_json_preview(
+                st.session_state["_json_bytes"].decode("utf-8"),
+                title="Steps in this pipeline",
+                expanded=True,
+            )
+
             if st.button("Apply pipeline", key="apply_json", type="primary", use_container_width=True):
-                with st.spinner("Applying pipeline steps..."):
+                # clear any previous debug log so the expander shows fresh output
+                st.session_state.pop("_pipeline_debug", None)
+                debug_lines = []
+                success = False
+                try:
+                    json_content = st.session_state["_json_bytes"]
+                    debug_lines.append("JSON bytes read from session state OK")
+
+                    original = st.session_state.current_df.copy()
+                    debug_lines.append(f"Snapshot taken: {original.shape[0]} rows x {original.shape[1]} cols")
+
+                    import json as _json
                     try:
-                        json_content = st.session_state["_json_bytes"]
-                        original = st.session_state.current_df.copy()
+                        _preview = _json.loads(json_content)
+                        n_steps = len(_preview.get("steps", []))
+                        debug_lines.append(f"JSON parsed OK: {n_steps} step(s) found")
+                    except Exception as parse_err:
+                        n_steps = 0
+                        debug_lines.append(f"JSON parse warning: {parse_err}")
+
+                    with st.spinner(f"Applying {n_steps} pipeline step(s), please wait..."):
+                        debug_lines.append("Calling import_pipeline_json...")
                         result, applied, skipped = import_pipeline_json(
                             json_content, st.session_state.current_df, settings,
                         )
+                        debug_lines.append(f"import_pipeline_json returned: applied={applied}, skipped={skipped}")
+                        debug_lines.append(f"Result shape: {result.shape[0]} rows x {result.shape[1]} cols")
+
                         st.session_state.current_df = result
                         st.session_state["history_len"] = st.session_state.get("history_len", 0) + 1
 
                         from pipeline import commit_history
-                        for label in applied:
-                            commit_history(f"Replayed: {label}", original)
-
-                        msg_parts = [f"{len(applied)} step(s) applied."]
-                        if skipped:
-                            msg_parts.append(
-                                f"{len(skipped)} skipped: "
-                                + ", ".join(skipped[:5])
-                                + ("..." if len(skipped) > 5 else "")
+                        if applied:
+                            commit_history(
+                                f"Replayed pipeline: {len(applied)} step(s)",
+                                original,
                             )
-                        st.session_state["_toast"] = (" ".join(msg_parts), "✔")
-                        st.session_state.pop("_json_bytes", None)
-                        st.session_state.pop("_json_file_key", None)
-                    except Exception as e:
-                        st.error(f"Could not apply pipeline: {e}")
+                            debug_lines.append("commit_history called OK")
+
+                    msg_parts = [f"{len(applied)} step(s) applied successfully."]
+                    if skipped:
+                        msg_parts.append(
+                            f"{len(skipped)} skipped: "
+                            + ", ".join(skipped[:5])
+                            + ("..." if len(skipped) > 5 else "")
+                        )
+                    final_msg = " ".join(msg_parts)
+                    debug_lines.append(f"Toast message set: {final_msg}")
+
+                    st.session_state["_toast"] = (final_msg, "✔")
+                    st.session_state.pop("_json_bytes", None)
+                    st.session_state.pop("_json_file_key", None)
+                    success = True
+
+                except Exception as e:
+                    import traceback
+                    debug_lines.append(f"EXCEPTION: {e}")
+                    debug_lines.append(traceback.format_exc())
+                    st.error(f"Could not apply pipeline: {e}")
+
+                # always save debug log so user can inspect it after rerun
+                st.session_state["_pipeline_debug"] = debug_lines
+                st.session_state["_pipeline_debug_success"] = success
                 st.rerun()
+
+        # show debug output after rerun so the user can see what happened
+        # displayed outside the button block so it survives the rerun
+        if st.session_state.get("_pipeline_debug"):
+            status = st.session_state.get("_pipeline_debug_success", False)
+            label = "Debug: last pipeline apply (success)" if status else "Debug: last pipeline apply (FAILED - expand to see error)"
+            with st.expander(label, expanded=not status):
+                for line in st.session_state["_pipeline_debug"]:
+                    st.text(line)
 
 
 def _render_python_export(hist):
@@ -248,7 +339,7 @@ def _render_report_pdf(cdf, hist, filename, df_key=""):
     ai_summary = st.session_state.get(f"ai_insights_{df_key}", {}).get("summary", "")
 
     if ai_summary:
-        st.caption("AI summary detected — it will be included in the report as an Executive Summary.")
+        st.caption("AI summary detected -- it will be included in the report as an Executive Summary.")
     else:
         st.caption("No AI summary found. Generate one in the Overview tab to include it in the report.")
 
@@ -283,11 +374,13 @@ def _render_report_pdf(cdf, hist, filename, df_key=""):
 
 def render(tab, cdf, settings, df_key=""):
     filename = settings.get("filename", "dataset")
+
+    # fire toast outside the tab context so it shows regardless of which tab is active
+    if "_toast" in st.session_state:
+        msg, icon = st.session_state.pop("_toast")
+        st.toast(msg, icon=icon)
+
     with tab:
-        # fire pending toast from previous rerun
-        if "_toast" in st.session_state:
-            msg, icon = st.session_state.pop("_toast")
-            st.toast(msg, icon=icon)
 
         _render_reset()
         st.divider()

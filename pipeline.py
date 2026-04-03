@@ -37,7 +37,7 @@ def commit_history(label, snap):
     st.session_state.history.append({"label": label, "df": snap})
     st.session_state["history_len"] = st.session_state.get("history_len", 0) + 1
 
-    # clear redo stack because new action creates a new timeline
+    # clear redo stack because a new action creates a new timeline
     st.session_state.redo_stack.clear()
     _autosave()
 
@@ -85,6 +85,23 @@ def export_pipeline_json(history):
     return json.dumps({"version": 1, "steps": steps}, indent=2)
 
 
+# moved to module level so both import_pipeline_json and build_pipeline_script can share it
+def _parse_label_meta(label, prefix, keys):
+    # pulls key=value pairs embedded in a history label string
+    # labels are stored as "Step Name|key1=val1|key2=val2"
+    # returns a dict with the requested keys, missing keys return empty string
+    meta = {k: "" for k in keys}
+    if "|" not in label:
+        return meta
+    parts = label.split("|")
+    for part in parts[1:]:
+        if "=" in part:
+            k, v = part.split("=", 1)
+            if k in meta:
+                meta[k] = v
+    return meta
+
+
 def import_pipeline_json(json_bytes, df, settings):
     from cleaning.basic import (
         clean_string_edges,
@@ -93,6 +110,8 @@ def import_pipeline_json(json_bytes, df, settings):
         stripping_whitespace,
     )
     from cleaning.advanced import missing_value_handler, smart_column_cleaner
+    from cleaning.validators import validate_email_col, validate_phone_col, validate_date_col
+    from cleaning.validators import cap_outliers, validate_range
 
     missing_threshold = settings.get("missing_threshold", 0.3)
     numeric_strategy = settings.get("numeric_strategy", "auto")
@@ -116,21 +135,27 @@ def import_pipeline_json(json_bytes, df, settings):
         if label == "Strip Whitespace" or label.startswith("Fix: strip_whitespace"):
             tmp = stripping_whitespace(tmp)
             applied.append(label)
+
         elif label == "Drop Duplicate Rows" or label.startswith("Fix: drop_duplicates"):
             tmp = drop_duplicate_rows(tmp)
             applied.append(label)
+
         elif label == "Drop Duplicate Columns" or label.startswith("Fix: drop_dup_cols"):
             tmp = drop_duplicate_columns(tmp)
             applied.append(label)
+
         elif label == "Clean String Edges" or label.startswith("Fix: clean_edges"):
             tmp = clean_string_edges(tmp, threshold=0.7)
             applied.append(label)
+
         elif label == "Smart Column Cleaner" or label.startswith("Fix: convert"):
             tmp = smart_column_cleaner(tmp, conversion_threshold=conversion_threshold)
             applied.append(label)
+
         elif label == "Handle Missing Values" or label.startswith("Fix: handle_missing"):
             tmp = missing_value_handler(tmp, threshold=missing_threshold, numeric_strategy=numeric_strategy)
             applied.append(label)
+
         elif label == "Auto-Fix All":
             tmp = stripping_whitespace(tmp)
             tmp = drop_duplicate_rows(tmp)
@@ -139,31 +164,81 @@ def import_pipeline_json(json_bytes, df, settings):
             tmp = smart_column_cleaner(tmp, conversion_threshold=conversion_threshold)
             tmp = missing_value_handler(tmp, threshold=missing_threshold, numeric_strategy=numeric_strategy)
             applied.append(label)
+
+        # validation steps - each reads metadata from the label and checks the column exists first
+
+        elif label.startswith("Validate Email"):
+            meta = _parse_label_meta(label, "Validate Email", ["col", "action", "pattern"])
+            col = meta["col"] or "email"
+            action = meta["action"] or "flag"
+            pattern = meta["pattern"] or r"^[\w\.\+\-]+@[\w\-]+\.[a-zA-Z]{2,}$"
+            # skip gracefully if the column no longer exists in this dataset
+            if col not in tmp.columns:
+                skipped.append(f"{label} (column '{col}' not found)")
+            else:
+                tmp = validate_email_col(tmp, col=col, action=action, custom_pattern=pattern)
+                applied.append(label)
+
+        elif label.startswith("Standardize Phone"):
+            meta = _parse_label_meta(label, "Standardize Phone", ["col", "cc"])
+            col = meta["col"] or "phone"
+            cc = meta["cc"] or "1"
+            if col not in tmp.columns:
+                skipped.append(f"{label} (column '{col}' not found)")
+            else:
+                tmp = validate_phone_col(tmp, col=col, default_country_code=cc)
+                applied.append(label)
+
+        elif label.startswith("Standardize Dates"):
+            meta = _parse_label_meta(label, "Standardize Dates", ["col", "output_fmt", "input_fmt"])
+            col = meta["col"] or "date"
+            output_fmt = meta["output_fmt"] or "%Y-%m-%d"
+            input_fmt = meta["input_fmt"] or ""
+            if col not in tmp.columns:
+                skipped.append(f"{label} (column '{col}' not found)")
+            else:
+                tmp = validate_date_col(tmp, col=col, output_format=output_fmt, custom_input_format=input_fmt)
+                applied.append(label)
+
+        elif label.startswith("Cap Outliers"):
+            meta = _parse_label_meta(label, "Cap Outliers", ["col", "method", "action", "threshold"])
+            col = meta["col"] or "value"
+            method = meta["method"] or "iqr"
+            action = meta["action"] or "cap"
+            # cast threshold safely so a bad saved value never crashes replay
+            try:
+                threshold = float(meta["threshold"]) if meta["threshold"] else 1.5
+            except ValueError:
+                threshold = 1.5
+            if col not in tmp.columns:
+                skipped.append(f"{label} (column '{col}' not found)")
+            else:
+                tmp = cap_outliers(tmp, col=col, method=method, action=action, threshold=threshold)
+                applied.append(label)
+
+        elif label.startswith("Validate Range"):
+            meta = _parse_label_meta(label, "Validate Range", ["col", "min", "max", "action"])
+            col = meta["col"] or "value"
+            action = meta["action"] or "flag"
+            # cast min and max safely so a bad saved value never crashes replay
+            try:
+                minval = float(meta["min"]) if meta["min"] else 0.0
+            except ValueError:
+                minval = 0.0
+            try:
+                maxval = float(meta["max"]) if meta["max"] else 100.0
+            except ValueError:
+                maxval = 100.0
+            if col not in tmp.columns:
+                skipped.append(f"{label} (column '{col}' not found)")
+            else:
+                tmp = validate_range(tmp, col=col, min_val=minval, max_val=maxval, action=action)
+                applied.append(label)
+
         else:
             skipped.append(label)
 
     return tmp, applied, skipped
-
-
-def _parse_label_meta(label, prefix, keys):
-    """
-    Pulls key=value pairs embedded in a history label string.
-
-    Labels are stored as "Step Name|key1=val1|key2=val2" so the exporter
-    can recover the exact settings the user chose without a separate store.
-
-    Returns a dict with the requested keys. Missing keys return empty string.
-    """
-    meta = {k: "" for k in keys}
-    if "|" not in label:
-        return meta
-    parts = label.split("|")
-    for part in parts[1:]:
-        if "=" in part:
-            k, v = part.split("=", 1)
-            if k in meta:
-                meta[k] = v
-    return meta
 
 
 def build_pipeline_script(history):
@@ -288,8 +363,8 @@ def build_pipeline_script(history):
 
         elif label.startswith("Validate Email"):
             meta = _parse_label_meta(label, "Validate Email", ["col", "action", "pattern"])
-            col     = meta["col"]     or "email"
-            action  = meta["action"]  or "flag"
+            col = meta["col"] or "email"
+            action = meta["action"] or "flag"
             pattern = meta["pattern"] or r"^[\w\.\+\-]+@[\w\-]+\.[a-zA-Z]{2,}$"
             lines += [
                 f"# col: {col}  action: {action}",
@@ -305,7 +380,7 @@ def build_pipeline_script(history):
         elif label.startswith("Standardize Phone"):
             meta = _parse_label_meta(label, "Standardize Phone", ["col", "cc"])
             col = meta["col"] or "phone"
-            cc  = meta["cc"]  or "1"
+            cc = meta["cc"] or "1"
             lines += [
                 f"# col: {col}  default country code: {cc}",
                 f"_cc = '{cc}'",
@@ -325,9 +400,9 @@ def build_pipeline_script(history):
 
         elif label.startswith("Standardize Dates"):
             meta = _parse_label_meta(label, "Standardize Dates", ["col", "output_fmt", "input_fmt"])
-            col        = meta["col"]        or "date"
+            col = meta["col"] or "date"
             output_fmt = meta["output_fmt"] or "%Y-%m-%d"
-            input_fmt  = meta["input_fmt"]  or ""
+            input_fmt = meta["input_fmt"] or ""
             lines += [
                 f"# col: {col}  output format: {output_fmt}",
                 f"_cleaned = df['{col}'].astype(str).str.strip().replace('', _np.nan).replace('nan', _np.nan)",
@@ -351,9 +426,9 @@ def build_pipeline_script(history):
 
         elif label.startswith("Cap Outliers"):
             meta = _parse_label_meta(label, "Cap Outliers", ["col", "method", "action", "threshold"])
-            col       = meta["col"]       or "value"
-            method    = meta["method"]    or "iqr"
-            action    = meta["action"]    or "cap"
+            col = meta["col"] or "value"
+            method = meta["method"] or "iqr"
+            action = meta["action"] or "cap"
             threshold = meta["threshold"] or "1.5"
             lines += [
                 f"# col: {col}  method: {method}  action: {action}  threshold: {threshold}",
@@ -382,9 +457,9 @@ def build_pipeline_script(history):
 
         elif label.startswith("Validate Range"):
             meta = _parse_label_meta(label, "Validate Range", ["col", "min", "max", "action"])
-            col    = meta["col"]    or "value"
-            minval = meta["min"]    or "0.0"
-            maxval = meta["max"]    or "100.0"
+            col = meta["col"] or "value"
+            minval = meta["min"] or "0.0"
+            maxval = meta["max"] or "100.0"
             action = meta["action"] or "flag"
             lines += [
                 f"# col: {col}  range: [{minval}, {maxval}]  action: {action}",
@@ -400,10 +475,9 @@ def build_pipeline_script(history):
                 ]
 
         else:
-            lines.append("# manual step no code generated")
+            lines.append("# manual step - no code generated")
 
         lines.append("")
 
     lines.append("print('Pipeline complete. Shape:', df.shape)")
     return "\n".join(lines)
-
