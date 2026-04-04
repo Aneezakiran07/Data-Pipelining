@@ -22,7 +22,6 @@ def _build_prompt(df, instruction):
     col_info = "\n".join(f"  {col} ({df[col].dtype})" for col in df.columns)
     sample = df.head(5).to_string(index=False)
 
-    # Build a GOOD sample that shows raw values so gemini can spot dirty data
     dirty_hints = []
     for col in df.columns:
         non_null = df[col].dropna().astype(str)
@@ -191,7 +190,7 @@ def _call_gemini(instruction, df):
         try:
             with urllib.request.urlopen(req, timeout=30) as resp:
                 body = json.loads(resp.read().decode("utf-8"))
-            break  # success — stop retrying
+            break
         except urllib.error.HTTPError as e:
             error_body = e.read().decode("utf-8")
             try:
@@ -202,7 +201,7 @@ def _call_gemini(instruction, df):
         except Exception as e:
             last_err = e
             if attempt == 0:
-                continue  # silently retry once
+                continue
     if body is None:
         return None, None, f"Request failed after 2 attempts: {last_err}", False
 
@@ -216,11 +215,9 @@ def _call_gemini(instruction, df):
     except Exception:
         return None, None, "Gemini returned an unexpected format. Try rephrasing your instruction.", False
 
-    # PRE_CONDITION_FAILED: data not ready for this operation
     if "PRE_CONDITION_FAILED" in code:
         return None, None, explanation or "A pre-condition must be met before this operation can run.", True
 
-    # CANNOT_DO: instruction is impossible or unclear
     if "CANNOT_DO" in code:
         return None, None, explanation or "Gemini could not understand that instruction. Try rephrasing.", False
 
@@ -239,7 +236,7 @@ def _run_code(df, code):
         return df, traceback.format_exc(limit=3)
 
 
-def render_nl_cleaner(cdf):
+def render_nl_cleaner(cdf, file_id="default"):
     api_key = _get_api_key()
     if not api_key:
         st.warning(
@@ -248,7 +245,6 @@ def render_nl_cleaner(cdf):
         )
         return
 
-    # show success, pre-condition warning, or hard error from the previous action
     if st.session_state.get("_nl_success"):
         st.success(st.session_state.pop("_nl_success"))
 
@@ -266,12 +262,12 @@ def render_nl_cleaner(cdf):
             "e.g. convert the Price column to a number\n"
             "e.g. remove all duplicate rows"
         ),
-        key="nl_instruction",
+        key=f"nl_instruction_{file_id}",
         height=100,
         help="Write in plain English. AI will generate the pandas code for you.",
     )
 
-    if st.button("Generate response", key="nl_generate", use_container_width=True, type="primary"):
+    if st.button("Generate response", key=f"nl_generate_{file_id}", use_container_width=True, type="primary"):
         if not instruction.strip():
             st.warning("Type an instruction first.")
             return
@@ -300,21 +296,19 @@ def render_nl_cleaner(cdf):
 
     st.divider()
 
-    # always show the explanation card so user knows what will happen
     st.info(explanation)
 
-    # editable code box — always shown, labelled as optional/fallback
     edited_code = st.text_area(
         "Code — review and edit before applying (AI-generated, may not be 100% accurate)",
         value=code,
-        key="nl_code_editor",
+        key=f"nl_code_editor_{file_id}",
         height=150,
     )
 
     col_apply, col_cancel = st.columns(2)
 
     with col_apply:
-        if st.button("Apply", key="nl_apply", use_container_width=True, type="primary"):
+        if st.button("Apply", key=f"nl_apply_{file_id}", use_container_width=True, type="primary"):
             new_df, run_err = _run_code(cdf, edited_code)
 
             if run_err:
@@ -345,7 +339,7 @@ def render_nl_cleaner(cdf):
             st.rerun()
 
     with col_cancel:
-        if st.button("Cancel", key="nl_cancel", use_container_width=True):
+        if st.button("Cancel", key=f"nl_cancel_{file_id}", use_container_width=True):
             st.session_state.pop("nl_pending_code", None)
             st.session_state.pop("nl_pending_explanation", None)
             st.session_state.pop("nl_pending_instruction", None)

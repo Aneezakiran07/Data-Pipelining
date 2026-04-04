@@ -95,13 +95,13 @@ def _init_guide():
         st.session_state.guide_checked = set()
 
 
-def _render_ai_cleaner_section(cdf):
+def _render_ai_cleaner_section(cdf, file_id):
     st.markdown("## AI Cleaner")
     st.caption(
         "Describe what you want to do in plain English. "
         "Gemini generates the pandas code and shows it to you before running anything."
     )
-    render_nl_cleaner(cdf)
+    render_nl_cleaner(cdf, file_id)
 
 
 def _render_ai_analysis_section(cdf, file_id):
@@ -269,13 +269,10 @@ def render(tab, cdf=None, file_id=None):
         st.markdown("# AI Assistant")
 
         if cdf is not None and file_id is not None:
-            # AI Cleaner at the top — most used feature, highlighted first
-            _render_ai_cleaner_section(cdf)
+            _render_ai_cleaner_section(cdf, file_id)
             st.divider()
 
-            # AI Analysis below — one-click dataset scan with fix cards
             _render_ai_analysis_section(cdf, file_id)
             st.divider()
 
-        # General guide always at the bottom regardless of file state
         _render_general_guide()
