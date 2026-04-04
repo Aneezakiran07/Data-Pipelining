@@ -107,7 +107,6 @@ def _apply_fix(action_key, sel_cols, cdf, missing_threshold, numeric_strategy):
 
 
 def _render_recommendations(cdf, conversion_threshold, missing_threshold, numeric_strategy, df_key):
-    # fire pending toast from previous rerun
     if "_toast" in st.session_state:
         msg, icon = st.session_state.pop("_toast")
         st.toast(msg, icon=icon)
@@ -144,58 +143,65 @@ def _render_recommendations(cdf, conversion_threshold, missing_threshold, numeri
         }.get(action_key, [])
 
         if af_cols:
-            r1, r2, r3 = st.columns([5, 1.4, 1])
-            with r1:
+            # single row: description on the left, popover + fix button on the right
+            col_desc, col_pop, col_fix = st.columns([5, 1.4, 1])
+            with col_desc:
                 st.write(f"**{title}**")
                 st.caption(desc)
-            with r2:
+            with col_pop:
                 n_sel = _rec_col_popover(action_key, af_cols)
-            with r3:
-                if st.button(
+            with col_fix:
+                clicked = st.button(
                     "Fix",
                     key=f"fix_{action_key}",
                     disabled=n_sel == 0,
                     type="primary" if n_sel else "secondary",
                     use_container_width=True,
-                ):
-                    sel_cols = st.session_state.selected_columns.get(action_key, [])
-                    try:
-                        _snap = snapshot()
-                        with st.spinner(f"Fixing {action_key.replace('_', ' ')} in {len(sel_cols)} column(s)..."):
-                            tmp = _apply_fix(action_key, sel_cols, cdf, missing_threshold, numeric_strategy)
-                        st.session_state.current_df = tmp
-                        commit_history(f"Fix: {action_key}", _snap)
-                        st.session_state.selected_columns.pop(action_key, None)
-                        st.session_state["_toast"] = (
-                            f"Fixed {action_key.replace('_', ' ')} on {len(sel_cols)} column(s).", "✔"
-                        )
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error: {e}")
+                )
+            # button logic outside columns so rerun fires cleanly
+            if clicked and n_sel > 0:
+                sel_cols = st.session_state.selected_columns.get(action_key, [])
+                try:
+                    _snap = snapshot()
+                    with st.spinner(f"Fixing {action_key.replace('_', ' ')} in {len(sel_cols)} column(s)..."):
+                        tmp = _apply_fix(action_key, sel_cols, cdf, missing_threshold, numeric_strategy)
+                    st.session_state.current_df = tmp
+                    commit_history(f"Fix: {action_key}", _snap)
+                    st.session_state.selected_columns.pop(action_key, None)
+                    st.session_state["_toast"] = (
+                        f"Fixed {action_key.replace('_', ' ')} on {len(sel_cols)} column(s).", "✔"
+                    )
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error: {e}")
+
         else:
-            r1, r2 = st.columns([5, 1])
-            with r1:
+            # single row: description on the left, fix button on the right
+            col_desc, col_fix = st.columns([6.4, 1])
+            with col_desc:
                 st.write(f"**{title}**")
                 st.caption(desc)
-            with r2:
-                if st.button("Fix", key=f"fix_{action_key}", type="primary", use_container_width=True):
-                    try:
-                        _snap = snapshot()
-                        if action_key == "drop_duplicates":
-                            with st.spinner("Removing duplicate rows..."):
-                                tmp = drop_duplicate_rows(cdf)
-                            st.session_state.current_df = tmp
-                            commit_history(f"Fix: {action_key}", _snap)
-                            st.session_state["_toast"] = ("Duplicate rows removed.", "✔")
-                        elif action_key == "drop_dup_cols":
-                            with st.spinner("Removing duplicate columns..."):
-                                tmp = drop_duplicate_columns(cdf)
-                            st.session_state.current_df = tmp
-                            commit_history(f"Fix: {action_key}", _snap)
-                            st.session_state["_toast"] = ("Duplicate columns removed.", "✔")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error: {e}")
+            with col_fix:
+                clicked = st.button("Fix", key=f"fix_{action_key}", type="primary", use_container_width=True)
+            if clicked:
+                try:
+                    _snap = snapshot()
+                    if action_key == "drop_duplicates":
+                        with st.spinner("Removing duplicate rows..."):
+                            tmp = drop_duplicate_rows(cdf)
+                        st.session_state.current_df = tmp
+                        commit_history(f"Fix: {action_key}", _snap)
+                        st.session_state["_toast"] = ("Duplicate rows removed.", "✔")
+                    elif action_key == "drop_dup_cols":
+                        with st.spinner("Removing duplicate columns..."):
+                            tmp = drop_duplicate_columns(cdf)
+                        st.session_state.current_df = tmp
+                        commit_history(f"Fix: {action_key}", _snap)
+                        st.session_state["_toast"] = ("Duplicate columns removed.", "✔")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error: {e}")
+
         st.write("")
 
     st.divider()
@@ -220,7 +226,6 @@ def _render_recommendations(cdf, conversion_threshold, missing_threshold, numeri
 
 def render(tab, cdf, conversion_threshold, missing_threshold, numeric_strategy, df_key=""):
     with tab:
-        # stable key not tied to df_key
         scan_key = "rec_scanned"
 
         if not st.session_state.get(scan_key):
@@ -234,7 +239,6 @@ def render(tab, cdf, conversion_threshold, missing_threshold, numeric_strategy, 
             _render_recommendations(cdf, conversion_threshold, missing_threshold, numeric_strategy, df_key)
             st.write("")
             if st.button("Re-scan", key="rec_rescan_btn", use_container_width=True):
-                # bust the cache so scan reruns immediately
                 from cache import get_analysis_and_recommendations
                 get_analysis_and_recommendations.clear()
                 st.rerun()

@@ -228,34 +228,21 @@ def _render_pipeline_json(hist, settings):
             )
 
             if st.button("Apply pipeline", key="apply_json", type="primary", use_container_width=True):
-                # clear any previous debug log so the expander shows fresh output
-                st.session_state.pop("_pipeline_debug", None)
-                debug_lines = []
-                success = False
                 try:
                     json_content = st.session_state["_json_bytes"]
-                    debug_lines.append("JSON bytes read from session state OK")
-
                     original = st.session_state.current_df.copy()
-                    debug_lines.append(f"Snapshot taken: {original.shape[0]} rows x {original.shape[1]} cols")
 
                     import json as _json
                     try:
                         _preview = _json.loads(json_content)
                         n_steps = len(_preview.get("steps", []))
-                        debug_lines.append(f"JSON parsed OK: {n_steps} step(s) found")
-                    except Exception as parse_err:
+                    except Exception:
                         n_steps = 0
-                        debug_lines.append(f"JSON parse warning: {parse_err}")
 
                     with st.spinner(f"Applying {n_steps} pipeline step(s), please wait..."):
-                        debug_lines.append("Calling import_pipeline_json...")
                         result, applied, skipped = import_pipeline_json(
                             json_content, st.session_state.current_df, settings,
                         )
-                        debug_lines.append(f"import_pipeline_json returned: applied={applied}, skipped={skipped}")
-                        debug_lines.append(f"Result shape: {result.shape[0]} rows x {result.shape[1]} cols")
-
                         st.session_state.current_df = result
                         st.session_state["history_len"] = st.session_state.get("history_len", 0) + 1
 
@@ -265,7 +252,6 @@ def _render_pipeline_json(hist, settings):
                                 f"Replayed pipeline: {len(applied)} step(s)",
                                 original,
                             )
-                            debug_lines.append("commit_history called OK")
 
                     msg_parts = [f"{len(applied)} step(s) applied successfully."]
                     if skipped:
@@ -274,33 +260,14 @@ def _render_pipeline_json(hist, settings):
                             + ", ".join(skipped[:5])
                             + ("..." if len(skipped) > 5 else "")
                         )
-                    final_msg = " ".join(msg_parts)
-                    debug_lines.append(f"Toast message set: {final_msg}")
-
-                    st.session_state["_toast"] = (final_msg, "✔")
+                    st.session_state["_toast"] = (" ".join(msg_parts), "\u2714")
                     st.session_state.pop("_json_bytes", None)
                     st.session_state.pop("_json_file_key", None)
-                    success = True
 
                 except Exception as e:
-                    import traceback
-                    debug_lines.append(f"EXCEPTION: {e}")
-                    debug_lines.append(traceback.format_exc())
                     st.error(f"Could not apply pipeline: {e}")
 
-                # always save debug log so user can inspect it after rerun
-                st.session_state["_pipeline_debug"] = debug_lines
-                st.session_state["_pipeline_debug_success"] = success
                 st.rerun()
-
-        # show debug output after rerun so the user can see what happened
-        # displayed outside the button block so it survives the rerun
-        if st.session_state.get("_pipeline_debug"):
-            status = st.session_state.get("_pipeline_debug_success", False)
-            label = "Debug: last pipeline apply (success)" if status else "Debug: last pipeline apply (FAILED - expand to see error)"
-            with st.expander(label, expanded=not status):
-                for line in st.session_state["_pipeline_debug"]:
-                    st.text(line)
 
 
 def _render_python_export(hist):
