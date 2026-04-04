@@ -65,8 +65,6 @@ def _render_undo_redo():
             from pipeline import undo_last
             label = undo_last()
             if label:
-                # no st.rerun here — sidebar runs before current_df exists in app.py
-                # setting the flag lets app.py pick it up and rerun safely
                 st.session_state["_toast"] = (f"Undone: {label}", "✔")
                 st.session_state["_sidebar_action_done"] = True
 
@@ -262,6 +260,9 @@ def _make_all_handler(section, cols):
     def h():
         checked = st.session_state.get(f"_va_{section}", False)
         st.session_state.val_selected[section] = cols.copy() if checked else []
+        # reset individual column checkbox keys to match the new all-or-nothing state
+        for c in cols:
+            st.session_state[f"_vc_{section}_{c}"] = checked
     return h
 
 
@@ -273,13 +274,67 @@ def _make_col_handler(section, col):
                 st.session_state.val_selected[section] = sel + [col]
         else:
             st.session_state.val_selected[section] = [c for c in sel if c != col]
+        # keep the all-checkbox in sync
+        all_checked = all(
+            st.session_state.get(f"_vc_{section}_{c}", False)
+            for c in st.session_state.get(f"_va_cols_{section}", [])
+        )
+        st.session_state[f"_va_{section}"] = all_checked
     return h
 
 
+def clear_popover(section, available_cols):
+    # call this after a successful run instead of val_selected.pop()
+    # clears both the selection dict entry AND the underlying checkbox keys
+    # without clearing checkbox keys, col_popover reads them back on next render
+    # and re-populates the selection as if the user never ran the operation
+    st.session_state.val_selected.pop(section, None)
+    st.session_state.pop(f"_va_{section}", None)
+    for c in available_cols:
+        st.session_state.pop(f"_vc_{section}_{c}", None)
+
+
 def col_popover(section, available_cols):
-    n = len(st.session_state.val_selected.get(section, []))
-    with st.popover(f"v {n} selected" if n else "v Select columns", use_container_width=True):
-        st.checkbox("Apply to all", key=f"_va_{section}", on_change=_make_all_handler(section, available_cols))
+    # store available cols so handlers can sync the all-checkbox
+    st.session_state[f"_va_cols_{section}"] = available_cols
+
+    # source of truth priority:
+    # 1. if val_selected[section] already exists (set by on_change handlers), use it
+    #    and sync the _vc_ keys to match so checkboxes display correctly
+    # 2. if val_selected[section] is missing (first render or after clear_popover),
+    #    read _vc_ keys to reconstruct it — this handles the stale key recovery case
+    # this prevents the previous bug where rerunning from another tab would
+    # overwrite a valid selection by re-reading _vc_ keys unconditionally
+    if section in st.session_state.val_selected:
+        current = [
+            c for c in available_cols
+            if c in st.session_state.val_selected[section]
+        ]
+        # sync _vc_ keys to match val_selected so checkboxes show correct state
         for c in available_cols:
-            st.checkbox(c, key=f"_vc_{section}_{c}", on_change=_make_col_handler(section, c))
+            st.session_state[f"_vc_{section}_{c}"] = c in current
+    else:
+        # val_selected missing means first render or after clear_popover wiped it
+        # safe to read _vc_ keys here since clear_popover also wipes them
+        current = [
+            c for c in available_cols
+            if st.session_state.get(f"_vc_{section}_{c}", False)
+        ]
+        st.session_state.val_selected[section] = current
+
+    n = len(current)
+    with st.popover(f"{n} selected" if n else "Select columns", use_container_width=True):
+        st.checkbox(
+            "Apply to all",
+            key=f"_va_{section}",
+            on_change=_make_all_handler(section, available_cols),
+        )
+        for c in available_cols:
+            st.checkbox(
+                c,
+                key=f"_vc_{section}_{c}",
+                on_change=_make_col_handler(section, c),
+            )
     return n
+
+

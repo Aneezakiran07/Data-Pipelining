@@ -2,7 +2,7 @@ import streamlit as st
 
 from cleaning import cap_outliers, validate_date_col, validate_email_col, validate_phone_col, validate_range
 from pipeline import commit_history, snapshot
-from state import col_popover
+from state import col_popover, clear_popover
 
 _DEFAULT_EMAIL_PATTERN = r"^[\w\.\+\-]+@[\w\-]+\.[a-zA-Z]{2,}$"
 
@@ -72,7 +72,7 @@ def render(tab, cdf, text_cols, num_cols, df_key=""):
                     st.session_state.current_df = tmp
                     for c in cols:
                         commit_history(f"Validate Email|col={c}|action={action}|pattern={pattern_used}", _snap)
-                    st.session_state.val_selected.pop("email", None)
+                    clear_popover("email", text_cols)
                     st.session_state["_toast"] = (f"Email validation done on {n_em} column(s).", "✔")
                     st.rerun()
                 except Exception as e:
@@ -115,7 +115,7 @@ def render(tab, cdf, text_cols, num_cols, df_key=""):
                     st.session_state.current_df = tmp
                     for c in cols:
                         commit_history(f"Standardize Phone|col={c}|cc={cc}", _snap)
-                    st.session_state.val_selected.pop("phone", None)
+                    clear_popover("phone", text_cols)
                     st.session_state["_toast"] = (f"Phone standardized in {n_ph} column(s).", "✔")
                     st.rerun()
                 except Exception as e:
@@ -163,7 +163,7 @@ def render(tab, cdf, text_cols, num_cols, df_key=""):
                     st.session_state.current_df = tmp
                     for c in cols:
                         commit_history(f"Standardize Dates|col={c}|output_fmt={date_fmt}|input_fmt={custom_date_fmt}", _snap)
-                    st.session_state.val_selected.pop("date", None)
+                    clear_popover("date", text_cols)
                     st.session_state["_toast"] = (f"Dates standardized in {n_dt} column(s).", "✔")
                     st.rerun()
                 except Exception as e:
@@ -206,7 +206,7 @@ def render(tab, cdf, text_cols, num_cols, df_key=""):
                     st.session_state.current_df = tmp
                     for c in cols:
                         commit_history(f"Cap Outliers|col={c}|method={o_method}|action={o_action}|threshold={o_thresh}", _snap)
-                    st.session_state.val_selected.pop("outlier", None)
+                    clear_popover("outlier", num_cols)
                     msg = (
                         f"Outliers capped in {n_out} column(s)."
                         if o_action == "cap"
@@ -250,7 +250,7 @@ def render(tab, cdf, text_cols, num_cols, df_key=""):
                     st.session_state.current_df = tmp
                     for c in cols:
                         commit_history(f"Validate Range|col={c}|min={rng_min}|max={rng_max}|action={rng_act}", _snap)
-                    st.session_state.val_selected.pop("range", None)
+                    clear_popover("range", num_cols)
                     msg = (
                         f"Range flagged across {n_rng} column(s)."
                         if rng_act == "flag"
@@ -260,7 +260,3 @@ def render(tab, cdf, text_cols, num_cols, df_key=""):
                     st.rerun()
                 except Exception as e:
                     st.error(str(e))
-
-
-
-        
