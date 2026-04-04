@@ -113,7 +113,7 @@ def build_report_pdf(original_df, cleaned_df, history, filename="dataset", ai_su
     story.append(Spacer(1, 0.3 * cm))
     story.append(hr())
 
-    # ai executive summary panel — only renders if summary was generated
+    # ai executive summary panel only renders if summary was generated
     if ai_summary and ai_summary.strip():
         summary_para = Paragraph(
             f"<b>AI Summary:</b> {ai_summary.strip()}",

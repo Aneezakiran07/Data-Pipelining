@@ -75,7 +75,7 @@ else:
         if "current_df" not in st.session_state:
             st.stop()
 
-        # safe to rerun here — init_state has run so current_df exists
+        # safe to rerun here ,init_state has run so current_df exists
         # sidebar undo/redo sets this flag instead of rerunning from the sidebar
         # which fires before current_df is set and crashes the tab layout
         if st.session_state.pop("_sidebar_action_done", False):
