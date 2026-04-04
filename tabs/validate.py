@@ -260,3 +260,4 @@ def render(tab, cdf, text_cols, num_cols, df_key=""):
                     st.rerun()
                 except Exception as e:
                     st.error(str(e))
+

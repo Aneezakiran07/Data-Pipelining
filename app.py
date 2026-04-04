@@ -11,6 +11,7 @@ apply_page_config()
 inject_css()
 
 from cache import get_dataframe_stats, load_file, make_df_key
+from filter_preview import render_filter_preview
 from guide import render as render_guide
 from state import init_state, maybe_reset_on_new_upload, render_sidebar, resolve_upload
 from tabs import (
@@ -28,6 +29,7 @@ missing_threshold, numeric_strategy, conversion_threshold, mode = render_sidebar
 (
     tab_upload,
     tab_overview,
+    tab_filter,
     tab_recommend,
     tab_clean,
     tab_validate,
@@ -37,6 +39,7 @@ missing_threshold, numeric_strategy, conversion_threshold, mode = render_sidebar
 ) = st.tabs([
     "  Upload  ",
     "  Overview  ",
+    "  Filter and Inspect  ",
     "  Recommendations  ",
     "  Clean  ",
     "  Validate  ",
@@ -53,7 +56,7 @@ if handle_resume_loading_screen():
 
 if uploaded is None:
     render_guide(tab_guide)
-    for tab in (tab_overview, tab_recommend, tab_clean, tab_validate, tab_profile, tab_history):
+    for tab in (tab_overview, tab_filter, tab_recommend, tab_clean, tab_validate, tab_profile, tab_history):
         with tab:
             st.info("Upload a file in the Upload tab to get started.")
 else:
@@ -114,6 +117,9 @@ else:
             conversion_threshold=conversion_threshold,
         )
 
+        with tab_filter:
+            render_filter_preview(cdf, all_cols)
+
         validate.render(tab_validate, cdf, text_cols, num_cols)
 
         profile.render(tab_profile, cdf, mode)
@@ -125,14 +131,8 @@ else:
             "filename": uploaded.name,
         }
 
-        # pass load_key as file_id so history_export can read the ai summary
-        # from the same cache key that ai_insights.py and guide.py write to
         history_export.render(tab_history, cdf, pipeline_settings, df_key=load_key)
 
     except Exception as e:
         st.error(f"Error reading the file: {e}")
         st.info("Make sure your file is a valid CSV or Excel format.")
-
-
-
-       
