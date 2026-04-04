@@ -56,7 +56,7 @@ if handle_resume_loading_screen():
 
 if uploaded is None:
     render_ai_assistant(tab_ai)
-    for tab in (tab_overview, tab_filter, tab_recommend, tab_clean, tab_validate, tab_profile, tab_history, tab_ai):
+    for tab in (tab_overview, tab_filter, tab_recommend, tab_clean, tab_validate, tab_profile, tab_history):
         with tab:
             st.info("Upload a file in the Upload tab to get started.")
 else:
