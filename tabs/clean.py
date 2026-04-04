@@ -15,7 +15,6 @@ from cleaning import (
     stripping_whitespace,
 )
 from cache import get_type_suggestions
-from nl_cleaner import render_nl_cleaner
 from pipeline import commit_history, snapshot
 
 
@@ -485,15 +484,6 @@ def _render_type_guesser(cdf, df_key=""):
             st.rerun()
 
 
-def _render_ai_cleaner(cdf):
-    st.write("**AI Cleaner**")
-    st.caption(
-        "Describe what you want to do in plain English. "
-        "Gemini generates the code and shows it to you before running anything."
-    )
-    render_nl_cleaner(cdf)
-
-
 def render(tab, cdf, all_cols, missing_threshold, numeric_strategy, conversion_threshold, df_key=""):
     with tab:
         st.subheader("Manual Cleaning Operations")
@@ -503,10 +493,6 @@ def render(tab, cdf, all_cols, missing_threshold, numeric_strategy, conversion_t
             msg, icon = st.session_state.pop("_toast")
             st.toast(msg, icon=icon)
 
-        with st.expander("AI Cleaner: describe what you want in plain English", expanded=False):
-            _render_ai_cleaner(cdf)
-
-        st.divider()
         _render_basic_cleaning(cdf)
 
         st.write("")

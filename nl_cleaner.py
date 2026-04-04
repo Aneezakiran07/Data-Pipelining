@@ -271,7 +271,7 @@ def render_nl_cleaner(cdf):
         help="Write in plain English. AI will generate the pandas code for you.",
     )
 
-    if st.button("Generate code", key="nl_generate", use_container_width=True, type="primary"):
+    if st.button("Generate response", key="nl_generate", use_container_width=True, type="primary"):
         if not instruction.strip():
             st.warning("Type an instruction first.")
             return

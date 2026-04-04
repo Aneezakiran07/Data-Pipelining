@@ -12,7 +12,7 @@ inject_css()
 
 from cache import get_dataframe_stats, load_file, make_df_key
 from filter_preview import render_filter_preview
-from guide import render as render_guide
+from ai_assistant import render as render_ai_assistant
 from state import init_state, maybe_reset_on_new_upload, render_sidebar, resolve_upload
 from tabs import (
     clean,
@@ -30,22 +30,22 @@ missing_threshold, numeric_strategy, conversion_threshold, mode = render_sidebar
     tab_upload,
     tab_overview,
     tab_filter,
+    tab_ai,
     tab_recommend,
     tab_clean,
     tab_validate,
     tab_profile,
     tab_history,
-    tab_guide,
 ) = st.tabs([
     "  Upload  ",
     "  Overview  ",
-    "  Filter and Inspect  ",
+    "  Filter & Inspect  ",
+    "  AI Assistant  ",
     "  Recommendations  ",
     "  Clean  ",
     "  Validate  ",
     "  Profile  ",
-    "  History and Export  ",
-    "  Guide  ",
+    "  History & Export  ",
 ])
 
 upload.render(tab_upload)
@@ -55,8 +55,8 @@ if handle_resume_loading_screen():
     st.stop()
 
 if uploaded is None:
-    render_guide(tab_guide)
-    for tab in (tab_overview, tab_filter, tab_recommend, tab_clean, tab_validate, tab_profile, tab_history):
+    render_ai_assistant(tab_ai)
+    for tab in (tab_overview, tab_filter, tab_recommend, tab_clean, tab_validate, tab_profile, tab_history, tab_ai):
         with tab:
             st.info("Upload a file in the Upload tab to get started.")
 else:
@@ -75,7 +75,7 @@ else:
         if "current_df" not in st.session_state:
             st.stop()
 
-        # safe to rerun here ,init_state has run so current_df exists
+        # safe to rerun here — init_state has run so current_df exists
         # sidebar undo/redo sets this flag instead of rerunning from the sidebar
         # which fires before current_df is set and crashes the tab layout
         if st.session_state.pop("_sidebar_action_done", False):
@@ -94,7 +94,7 @@ else:
             f"{stats['memory_usage']:.2f} MB"
         )
 
-        render_guide(tab_guide, cdf=cdf, file_id=load_key)
+        render_ai_assistant(tab_ai, cdf=cdf, file_id=load_key)
 
         overview.render(tab_overview, cdf, stats, orig_stats, file_id=load_key, df_key=df_key)
 
