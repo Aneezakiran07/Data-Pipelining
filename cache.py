@@ -342,11 +342,12 @@ def get_correlation_data(df_key: str, df: pd.DataFrame, method: str = "pearson")
     for col_a in num_cols:
         for col_b in num_cols:
             val = corr.loc[col_a, col_b]
+            fval = float(val)
             rows.append({
                 "col_a": col_a,
                 "col_b": col_b,
-                "value": round(float(val), 3),
-                "abs_value": round(abs(float(val)), 3),
+                "value": None if fval != fval else round(fval, 3),
+                "abs_value": None if fval != fval else round(abs(fval), 3),
             })
 
     return {
