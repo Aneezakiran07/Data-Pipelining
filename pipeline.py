@@ -414,11 +414,11 @@ def build_pipeline_script(history):
                     "# fill any rows the custom format missed using auto detection",
                     "_still_unparsed = _parsed.isna() & _cleaned.notna()",
                     "if _still_unparsed.any():",
-                    "    _parsed[_still_unparsed] = _pd.to_datetime(_cleaned[_still_unparsed], infer_datetime_format=True, errors='coerce')",
+                    "    _parsed[_still_unparsed] = _pd.to_datetime(_cleaned[_still_unparsed], errors='coerce')",
                 ]
             else:
                 lines += [
-                    "_parsed = _pd.to_datetime(_cleaned, infer_datetime_format=True, errors='coerce')",
+                    "_parsed = _pd.to_datetime(_cleaned, errors='coerce')",
                 ]
             lines += [
                 f"df['{col}'] = _parsed.dt.strftime('{output_fmt}').where(_parsed.notna(), other=None)",

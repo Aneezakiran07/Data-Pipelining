@@ -474,7 +474,7 @@ def get_type_suggestions(df_key: str, df: pd.DataFrame):
             continue
 
         date_sample = str_series.head(20)
-        parsed = pd.to_datetime(date_sample, errors="coerce", infer_datetime_format=True)
+        parsed = pd.to_datetime(date_sample, errors="coerce")
         date_match = parsed.notna().mean()
         if date_match >= 0.6:
             suggestions.append({
