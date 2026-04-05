@@ -12,11 +12,11 @@ def _ensure_dir():
     os.makedirs(PERSIST_DIR, exist_ok=True)
 
 def make_stable_file_key(filename: str, file_bytes: bytes) -> str:
-    # builds a session key from filename and file size
-    # file id from Streamlit changes on every reload so it cannot be used
-    # filename plus size is stable as long as the user uploads the same file
-    size = len(file_bytes)
-    raw = f"{filename}_{size}"
+    # uses content hash instead of file size so two different files
+    # named the same thing never share the same session
+    # e.g. two users uploading their own test_data.csv get separate sessions
+    content_hash = hashlib.md5(file_bytes).hexdigest()
+    raw = f"{filename}_{content_hash}"
     return hashlib.md5(raw.encode()).hexdigest()
 
 def _session_path(stable_key: str) -> str:
