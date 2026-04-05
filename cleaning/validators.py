@@ -69,11 +69,11 @@ def validate_date_col(df, col, output_format="%Y-%m-%d", custom_input_format="")
     if custom_input_format and custom_input_format.strip():
         parsed = pd.to_datetime(cleaned, format=custom_input_format.strip(), errors="coerce")
 
-    # first pass: fast C-level inference for rows not yet parsed
+    # first pass: auto-detection for rows not yet parsed
     still_unparsed = parsed.isna() & cleaned.notna()
     if still_unparsed.any():
         parsed[still_unparsed] = pd.to_datetime(
-            cleaned[still_unparsed], infer_datetime_format=True, errors="coerce"
+            cleaned[still_unparsed], errors="coerce"
         )
 
     # second pass: explicit format list only for rows that still failed
@@ -133,5 +133,3 @@ def validate_range(df, col, min_val, max_val, action="flag"):
     else:
         df_clean = df_clean[in_range].reset_index(drop=True)
     return df_clean
-
-    
