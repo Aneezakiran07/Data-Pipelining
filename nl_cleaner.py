@@ -1,3 +1,4 @@
+import ast
 import re
 import traceback
 
@@ -8,6 +9,110 @@ from pipeline import commit_history, snapshot
 
 GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
 GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+
+# blocked names that should never appear in user code
+_BLOCKED_NAMES = {
+    "os", "sys", "subprocess", "shutil", "socket", "urllib",
+    "requests", "http", "ftplib", "smtplib", "imaplib", "poplib",
+    "importlib", "runpy", "ctypes", "mmap", "signal", "pty",
+    "tempfile", "pathlib", "glob", "io", "open", "eval", "exec",
+    "compile", "breakpoint", "input", "__import__", "__builtins__",
+    "__loader__", "__spec__", "getattr", "setattr", "delattr",
+    "vars", "dir", "globals", "locals", "object", "type",
+}
+
+# safe builtins the code is allowed to call
+_SAFE_BUILTINS = {
+    "abs": abs, "all": all, "any": any, "bool": bool,
+    "dict": dict, "enumerate": enumerate, "filter": filter,
+    "float": float, "int": int, "isinstance": isinstance,
+    "len": len, "list": list, "map": map, "max": max,
+    "min": min, "print": print, "range": range, "round": round,
+    "set": set, "sorted": sorted, "str": str, "sum": sum,
+    "tuple": tuple, "zip": zip,
+}
+
+
+def _static_check(code: str):
+    """
+    Parse the code with ast and reject anything dangerous
+    before a single byte is executed.
+    Returns (ok: bool, reason: str)
+    """
+    # block shell-style strings even before parsing
+    lowered = code.lower()
+    shell_patterns = [
+        "os.system", "os.popen", "subprocess", "shell=true",
+        "curl ", "wget ", "bash ", "sh ", "powershell",
+        "__import__", "importlib", "open(", "exec(", "eval(",
+        "getattr(", "setattr(", "builtins", "pty.spawn",
+        "ctypes", "socket.", "urllib.request", "http.client",
+    ]
+    for pat in shell_patterns:
+        if pat in lowered:
+            return False, f"Blocked pattern detected: `{pat}`"
+
+    # parse and walk the AST
+    try:
+        tree = ast.parse(code, mode="exec")
+    except SyntaxError as e:
+        return False, f"Syntax error in generated code: {e}"
+
+    for node in ast.walk(tree):
+        # block any import statement
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            names = [a.name for a in getattr(node, "names", [])]
+            return False, f"Import not allowed: {', '.join(names)}"
+
+        # block attribute access on blocked module names
+        if isinstance(node, ast.Attribute):
+            if isinstance(node.value, ast.Name) and node.value.id in _BLOCKED_NAMES:
+                return False, f"Access to `{node.value.id}` is not allowed"
+
+        # block calls to blocked names
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name) and node.func.id in _BLOCKED_NAMES:
+                return False, f"Call to `{node.func.id}` is not allowed"
+            if isinstance(node.func, ast.Attribute):
+                if isinstance(node.func.value, ast.Name):
+                    if node.func.value.id in _BLOCKED_NAMES:
+                        return False, f"Call to `{node.func.value.id}.{node.func.attr}` is not allowed"
+
+        # block dunder attribute access like df.__class__
+        if isinstance(node, ast.Attribute) and node.attr.startswith("__"):
+            return False, f"Access to dunder attribute `{node.attr}` is not allowed"
+
+        # block Name references to blocked identifiers
+        if isinstance(node, ast.Name) and node.id in _BLOCKED_NAMES:
+            return False, f"Reference to `{node.id}` is not allowed"
+
+    return True, ""
+
+
+def _run_code(df, code):
+    """
+    Execute AI generated pandas code in a locked down sandbox.
+    Only pd and safe builtins are visible. Imports are blocked.
+    """
+    ok, reason = _static_check(code)
+    if not ok:
+        return df, f"Security check failed: {reason}"
+
+    # restricted globals with no builtins except our safe list
+    safe_globals = {
+        "__builtins__": _SAFE_BUILTINS,
+        "pd": pd,
+    }
+    local_vars = {"df": df.copy()}
+
+    try:
+        exec(code, safe_globals, local_vars)  # noqa: S102
+        result = local_vars.get("df")
+        if not isinstance(result, pd.DataFrame):
+            return df, "Code did not return a dataframe"
+        return result, None
+    except Exception:
+        return df, traceback.format_exc(limit=3)
 
 
 def _get_api_key():
@@ -50,32 +155,32 @@ The app the user is working in has these tabs and features. When telling the use
 to fix a pre-condition, reference the EXACT tab name and feature name from this list:
 
   RECOMMENDATIONS TAB:
-    - "Convert Currency"   → columns containing currency symbols like $, €, £, ¥
-    - "Convert Percentage" → columns containing percentage signs like %
-    - "Convert Units"      → columns containing unit suffixes like kg, km, hrs, lbs
-    - "Convert Duration"   → columns containing duration values like 1h30m, 2:30
-    - "Strip Whitespace"   → columns with leading/trailing spaces
-    - "Clean String Edges" → columns with special characters at start/end of values
-    - "Handle Missing Values" → columns with null/empty values (auto fill using KNN or mode)
-    - "Drop Duplicates"    → duplicate rows or duplicate columns
+    - "Convert Currency"   -> columns containing currency symbols like $, euro, pound, yen
+    - "Convert Percentage" -> columns containing percentage signs like %
+    - "Convert Units"      -> columns containing unit suffixes like kg, km, hrs, lbs
+    - "Convert Duration"   -> columns containing duration values like 1h30m, 2:30
+    - "Strip Whitespace"   -> columns with leading/trailing spaces
+    - "Clean String Edges" -> columns with special characters at start/end of values
+    - "Handle Missing Values" -> columns with null/empty values (auto fill using KNN or mode)
+    - "Drop Duplicates"    -> duplicate rows or duplicate columns
 
   CLEAN TAB:
-    - "Smart Column Cleaner"   → bulk auto-convert currency/percentage/unit/duration columns
-    - "Handle Missing Values"  → fill missing values (same as Recommendations but manual trigger)
-    - "Column Type Override"   → manually cast a column to string/integer/float/datetime/boolean/category
-    - "Data Type Guesser"      → auto-detect and suggest correct types for all columns
-    - "Find and Replace"       → find and replace text values in a column
-    - "Split Column"           → split one column into multiple using a delimiter
-    - "Merge Columns"          → combine two or more columns into one
-    - "Rename Columns"         → rename column headers
-    - "AI Cleaner"             → this feature itself (natural language instructions)
+    - "Smart Column Cleaner"   -> bulk auto-convert currency/percentage/unit/duration columns
+    - "Handle Missing Values"  -> fill missing values (same as Recommendations but manual trigger)
+    - "Column Type Override"   -> manually cast a column to string/integer/float/datetime/boolean/category
+    - "Data Type Guesser"      -> auto-detect and suggest correct types for all columns
+    - "Find and Replace"       -> find and replace text values in a column
+    - "Split Column"           -> split one column into multiple using a delimiter
+    - "Merge Columns"          -> combine two or more columns into one
+    - "Rename Columns"         -> rename column headers
+    - "AI Cleaner"             -> this feature itself (natural language instructions)
 
   VALIDATE TAB:
-    - "Validate Email"             → flag or remove rows with invalid email addresses
-    - "Standardize Phone Numbers"  → strip non-digit chars and format to +[country][number]
-    - "Standardize Dates"          → parse and reformat date columns to a chosen format
-    - "Cap and Remove Outliers"    → cap or remove statistical outliers using IQR or Z-score
-    - "Validate Value Range"       → flag or remove rows outside a min/max numeric range
+    - "Validate Email"             -> flag or remove rows with invalid email addresses
+    - "Standardize Phone Numbers"  -> strip non-digit chars and format to +[country][number]
+    - "Standardize Dates"          -> parse and reformat date columns to a chosen format
+    - "Cap and Remove Outliers"    -> cap or remove statistical outliers using IQR or Z-score
+    - "Validate Value Range"       -> flag or remove rows outside a min/max numeric range
 
 --- YOUR JOB ---
 Before writing any code, REASON about whether the instruction can actually succeed
@@ -85,34 +190,34 @@ given the current state of the data. Ask yourself:
 2. What is the USER'S INTENT?
 3. Does the app already have a feature that handles this?
 
-STEP 1 — CHECK IF THE APP ALREADY HANDLES IT:
+STEP 1 - CHECK IF THE APP ALREADY HANDLES IT:
 Look at the APP FEATURE MAP above. If the user's request maps to an existing app feature,
 set the explanation to clearly say TWO things:
-  a) The guaranteed path: "The recommended way is to go to [Tab] and use [Feature] —
+  a) The guaranteed path: "The recommended way is to go to [Tab] and use [Feature] -
      this is a tested and guaranteed method that will work correctly."
   b) The code fallback: "If you prefer to do it here, the code below should work,
      but it may not be 100% accurate. Verify the result in the Profile tab and use the
      History & Export tab to undo if something looks off."
 Then STILL generate the working pandas code for it.
-Do NOT use PRE_CONDITION_FAILED when an app feature exists — always provide both.
+Do NOT use PRE_CONDITION_FAILED when an app feature exists - always provide both.
 
-STEP 2 — CHECK FOR PRE-CONDITIONS (only if no app feature covers it):
+STEP 2 - CHECK FOR PRE-CONDITIONS (only if no app feature covers it):
 If the instruction ASSUMES a clean column but the column is NOT clean, block it.
 Examples:
-  - "fill missing Salary with the median" → Salary has currency symbols → BLOCK
-  - "sort by Salary descending" → Salary has currency symbols → BLOCK
+  - "fill missing Salary with the median" -> Salary has currency symbols -> BLOCK
+  - "sort by Salary descending" -> Salary has currency symbols -> BLOCK
   - Point user to the right app feature to fix the column first, then come back.
 
-CRITICAL RULE — NEVER block cleaning/conversion instructions:
+CRITICAL RULE - NEVER block cleaning/conversion instructions:
   If the instruction is about cleaning or converting a column (e.g. "remove currency
   symbols", "convert to numeric", "strip the % sign", "extract the number") AND no
   app feature covers this exact operation, generate the code. Do NOT warn them to fix
-  it first — they are already fixing it.
+  it first - they are already fixing it.
 
-STEP 3 — GENERATE CODE (only if steps 1 and 2 didn't block):
+STEP 3 - GENERATE CODE (only if steps 1 and 2 did not block):
 The operation is feasible and no app feature covers it. Generate working pandas code.
 Always end the explanation with:
-"AI can make mistakes — verify the result in the Profile tab and use the History & Export tab to undo the operation if something looks off."
+"AI can make mistakes - verify the result in the Profile tab and use the History & Export tab to undo the operation if something looks off."
 
 If a pre-condition is needed, set code to PRE_CONDITION_FAILED and write a clear,
 friendly explanation that states the specific problem and points to the exact app feature.
@@ -131,10 +236,10 @@ Rules for the code field:
 - Use PRE_CONDITION_FAILED if a pre-condition must be met first
 - Use CANNOT_DO if the instruction is truly impossible or completely unclear
 - NEVER use .astype(float) or .astype(int) directly on a column that contains
-  non-numeric characters — it will crash. Always strip first, then convert.
+  non-numeric characters - it will crash. Always strip first, then convert.
 - Use these safe patterns depending on what the column contains:
 
-  CURRENCY / COMMAS (e.g. "$1,200", "£2,300", "€500"):
+  CURRENCY / COMMAS (e.g. "$1,200", "2,300", "500"):
     df['col'] = pd.to_numeric(df['col'].astype(str).str.replace(r'[^\d.\-]', '', regex=True), errors='coerce')
 
   PARENTHESES AS NEGATIVES (e.g. "(1,200)"):
@@ -146,7 +251,7 @@ Rules for the code field:
   UNIT SUFFIXES (e.g. "10kg", "5.5km", "200lbs"):
     df['col'] = pd.to_numeric(df['col'].astype(str).str.extract(r'([-]?\d+\.?\d*)', expand=False), errors='coerce')
 
-  MIXED TYPES / GENERAL DIRTY NUMERIC (anything with stray non-numeric chars):
+  MIXED TYPES / GENERAL DIRTY NUMERIC:
     df['col'] = pd.to_numeric(df['col'].astype(str).str.replace(r'[^\d.\-]', '', regex=True), errors='coerce')
 
   DATETIME STRINGS (e.g. "01/02/2023", "March 5 2022"):
@@ -224,18 +329,6 @@ def _call_gemini(instruction, df):
     return code, explanation, None, False
 
 
-def _run_code(df, code):
-    local_vars = {"df": df.copy(), "pd": pd}
-    try:
-        exec(code, {}, local_vars)  # noqa: S102
-        result = local_vars["df"]
-        if not isinstance(result, pd.DataFrame):
-            return df, "code did not produce a dataframe"
-        return result, None
-    except Exception:
-        return df, traceback.format_exc(limit=3)
-
-
 def render_nl_cleaner(cdf, file_id="default"):
     api_key = _get_api_key()
     if not api_key:
@@ -295,11 +388,10 @@ def render_nl_cleaner(cdf, file_id="default"):
         return
 
     st.divider()
-
     st.info(explanation)
 
     edited_code = st.text_area(
-        "Code — review and edit before applying (AI-generated, may not be 100% accurate)",
+        "Code - review and edit before applying (AI-generated, may not be 100% accurate)",
         value=code,
         key=f"nl_code_editor_{file_id}",
         height=150,
@@ -309,6 +401,16 @@ def render_nl_cleaner(cdf, file_id="default"):
 
     with col_apply:
         if st.button("Apply", key=f"nl_apply_{file_id}", use_container_width=True, type="primary"):
+            # run static check before exec
+            ok, reason = _static_check(edited_code)
+            if not ok:
+                st.session_state["_nl_error"] = (
+                    f"Security check blocked this code: {reason}\n\n"
+                    "Only pandas operations on `df` are allowed."
+                )
+                st.rerun()
+                return
+
             new_df, run_err = _run_code(cdf, edited_code)
 
             if run_err:
@@ -344,3 +446,6 @@ def render_nl_cleaner(cdf, file_id="default"):
             st.session_state.pop("nl_pending_explanation", None)
             st.session_state.pop("nl_pending_instruction", None)
             st.rerun()
+
+
+    
