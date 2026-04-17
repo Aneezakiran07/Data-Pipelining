@@ -3,10 +3,17 @@ import re
 import urllib.request
 import urllib.error
 
+import pandas as pd
 import streamlit as st
 
 GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
 GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+
+# maximum number of rows sampled for the prompt so PII exposure is bounded
+_PROMPT_SAMPLE_ROWS = 3
+
+# maximum number of characters shown per cell value in the prompt sample
+_MAX_CELL_CHARS = 20
 
 
 def _get_api_key():
@@ -17,9 +24,46 @@ def _get_api_key():
     return key
 
 
+def _safe_sample_values(series, n=3):
+    """
+    Returns a short list of representative values from a column that are
+    safe to send externally. Real values are truncated to _MAX_CELL_CHARS
+    characters. Columns whose name suggests PII are replaced with a
+    shape descriptor instead of actual values.
+    """
+    pii_keywords = {
+        "email", "mail", "phone", "mobile", "ssn", "passport",
+        "address", "dob", "birth", "salary", "wage", "income",
+        "password", "secret", "token", "credit", "card", "bank",
+        "account", "national", "id", "nid", "cnic",
+    }
+    col_lower = series.name.lower() if series.name else ""
+    is_pii = any(kw in col_lower for kw in pii_keywords)
+
+    if is_pii:
+        return f"[{series.notna().sum()} non-null values, hidden for privacy]"
+
+    non_null = series.dropna()
+    if non_null.empty:
+        return "all null"
+
+    samples = non_null.head(n).astype(str).str[:_MAX_CELL_CHARS].tolist()
+    return ", ".join(f'"{v}"' for v in samples)
+
+
 def _build_prompt(df):
-    col_info = "\n".join(f"  {col} ({df[col].dtype})" for col in df.columns)
-    sample = df.head(8).to_string(index=False)
+    # build column info with dtype, null count, and truncated safe samples only
+    # real row data is never sent in full to avoid leaking PII
+    col_lines = []
+    for col in df.columns:
+        s = df[col]
+        null_pct = round(s.isna().mean() * 100, 1)
+        sample_str = _safe_sample_values(s, n=_PROMPT_SAMPLE_ROWS)
+        col_lines.append(
+            f"  {col} ({s.dtype}) | {null_pct}% null | samples: {sample_str}"
+        )
+    col_info = "\n".join(col_lines)
+
     missing = df.isna().sum()
     missing_info = "\n".join(
         f"  {col}: {cnt} missing ({round(cnt / len(df) * 100, 1)}%)"
@@ -66,11 +110,8 @@ Validate tab features (use exact names only):
 - Cap and Remove Outliers: pick Method (iqr or zscore), pick Action (cap or remove), set Threshold, select columns, click Run
 - Validate Value Range: set Min and Max, pick Action (flag or remove), select columns, click Run
 
-Column names and types:
+Column names, types, null rates, and sample values:
 {col_info}
-
-First 8 rows:
-{sample}
 
 Missing value counts:
 {missing_info}
@@ -180,11 +221,9 @@ def render_summary(df, file_id):
     # nothing cached yet, show button so user triggers on demand
     # do not call the api automatically as it blocks all tabs from rendering
     if st.button("Generate AI Summary", key="gen_summary_btn", use_container_width=True):
-        # shows spinner while calling gemini for the full insights json
         with st.spinner("Generating AI summary, please wait..."):
             result, err = get_ai_insights(df, file_id)
         if err or not result:
             st.caption("AI summary unavailable.")
             return
-        # result is now in session state under cache_key, rerun to display it
         st.rerun()

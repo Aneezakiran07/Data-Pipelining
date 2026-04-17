@@ -1,7 +1,30 @@
+import re
+
 import numpy as np
 import pandas as pd
 
 from .basic import checking_valid_input
+
+# maxi character length for a user supplied regex pattern
+# patterns longer than this are rejected before compilation
+_MAX_PATTERN_LEN = 300
+
+_DEFAULT_EMAIL_PATTERN = r"^[\w\.\+\-]+@[\w\-]+\.[a-zA-Z]{2,}$"
+
+
+def _safe_regex(pattern: str, fallback: str) -> str:
+    """
+    Validates a user supplied regex pattern before it is compiled and used.
+    Rejects patterns that are too long or fail re.compile to prevent ReDoS.
+    Returns the fallback pattern if the supplied one is unsafe or invalid.
+    """
+    if not pattern or len(pattern) > _MAX_PATTERN_LEN:
+        return fallback
+    try:
+        re.compile(pattern)
+        return pattern
+    except re.error:
+        return fallback
 
 
 def validate_email_col(df, col, action="flag", custom_pattern=""):
@@ -10,9 +33,9 @@ def validate_email_col(df, col, action="flag", custom_pattern=""):
         raise ValueError(f"Column '{col}' not found")
     df_clean = df.copy()
 
-    # use custom regex if provided, fall back to standard email pattern
-    pattern = custom_pattern.strip() if custom_pattern and custom_pattern.strip() \
-        else r"^[\w\.\+\-]+@[\w\-]+\.[a-zA-Z]{2,}$"
+    # validate the pattern before use so a crafted ReDoS string cannot hang the server
+    raw_pattern = custom_pattern.strip() if custom_pattern and custom_pattern.strip() else ""
+    pattern = _safe_regex(raw_pattern, _DEFAULT_EMAIL_PATTERN)
 
     try:
         is_valid = df_clean[col].astype(str).str.strip().str.match(pattern)
@@ -120,6 +143,7 @@ def cap_outliers(df, col, method="iqr", action="cap", threshold=1.5):
     return df_clean
 
 
+# self explanatory?!ig
 def validate_range(df, col, min_val, max_val, action="flag"):
     checking_valid_input(df)
     if col not in df.columns:

@@ -15,6 +15,13 @@ LARGE_FILE_WARN_THRESHOLD = 50_000
 # rows used for sampled analysis functions on large files
 ANALYSIS_SAMPLE_SIZE = 20_000
 
+# hard cap on uploaded file size in bytes (200 MB)
+# files above this are rejected before any parsing begins
+_MAX_FILE_BYTES = 200 * 1024 * 1024
+
+# allowed file extensions
+_ALLOWED_EXTENSIONS = {"csv", "xlsx", "xls"}
+
 
 def make_df_key(df: pd.DataFrame) -> str:
     """
@@ -64,18 +71,47 @@ def _sample_for_analysis(df: pd.DataFrame) -> pd.DataFrame:
     return df.sample(ANALYSIS_SAMPLE_SIZE, random_state=42)
 
 
+def _get_extension(filename: str) -> str:
+    """
+    Returns the lowercase file extension from the rightmost dot only.
+    A filename like evil.csv.xlsx returns xlsx, not csv.
+    Only the final segment after the last dot is trusted.
+    """
+    parts = filename.rsplit(".", 1)
+    if len(parts) < 2:
+        return ""
+    return parts[-1].lower().strip()
+
+
 # file loading
 
 @st.cache_data(show_spinner=False)
 def load_file(file_bytes: bytes, filename: str, file_id: str, sheet_name=None):
     """
     Loads a CSV or Excel file from bytes.
+    Rejects files that exceed _MAX_FILE_BYTES before any parsing begins.
+    Only accepts extensions in _ALLOWED_EXTENSIONS so double-extension tricks
+    like evil.csv.xlsx are handled correctly by reading the final extension only.
     For CSV files above LARGE_FILE_THRESHOLD rows, reads in chunks and concatenates
     so peak memory during load stays low. Dtype downcasting is applied automatically
     to large files to cut memory usage roughly in half.
     A warning is stored in session state so app.py can show it after load.
     """
-    ext = filename.split(".")[-1].lower()
+    # size guard runs before any parsing so a giant file never reaches pandas
+    if len(file_bytes) > _MAX_FILE_BYTES:
+        raise ValueError(
+            f"File is too large ({len(file_bytes) / 1024 / 1024:.1f} MB). "
+            f"Maximum allowed size is {_MAX_FILE_BYTES // 1024 // 1024} MB."
+        )
+
+    ext = _get_extension(filename)
+
+    if ext not in _ALLOWED_EXTENSIONS:
+        raise ValueError(
+            f"Unsupported file type: .{ext}. "
+            f"Please upload a CSV or Excel file (.csv, .xlsx, .xls)."
+        )
+
     buf = io.BytesIO(file_bytes)
 
     if ext == "csv":
@@ -604,4 +640,4 @@ def get_quality_score(df_key: str, df: pd.DataFrame):
                 "detail": f"{avg_invalid_frac*100:.1f}% of text values are placeholder or invalid strings",
             },
         },
-}
+    }
