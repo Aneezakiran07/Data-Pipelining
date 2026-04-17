@@ -1,0 +1,9 @@
+id,column_name,regex_pattern,file_size_kb,status
+1,normal_column,^[0-9]+$,12,valid
+2,user_data_field,"[a-zA-Z\s]+",45,valid
+3,"col_name""); import os; os.system(""echo pwned""); (""","^.{0,300}$",8,injection_attempt
+4,complex_logic,"(a+)+$",250,redos_risk
+5,oversized_meta,^\w+$,1024,size_violation
+6,very_long_step_list,^.*$,50,count_violation
+7,nested_json_field,"(\\d{3})-(\\d{2})-(\\d{4})",15,valid
+8,empty_column,,2,valid

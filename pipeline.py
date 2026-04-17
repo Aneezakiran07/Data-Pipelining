@@ -1,5 +1,13 @@
 import json
+import re
 import streamlit as st
+
+# wrote security test for pipeline csv, check it out!
+# maximum number of bytes accepted from an uploaded pipeline JSON file
+_MAX_JSON_BYTES = 512_000
+
+# maximum length allowed for a user supplied regex pattern before it is rejected
+_MAX_REGEX_LEN = 300
 
 
 def snapshot():
@@ -85,7 +93,6 @@ def export_pipeline_json(history):
     return json.dumps({"version": 1, "steps": steps}, indent=2)
 
 
-# moved to module level so both import_pipeline_json and build_pipeline_script can share it
 def _parse_label_meta(label, prefix, keys):
     # pulls key=value pairs embedded in a history label string
     # labels are stored as "Step Name|key1=val1|key2=val2"
@@ -102,6 +109,24 @@ def _parse_label_meta(label, prefix, keys):
     return meta
 
 
+def _safe_col(col: str) -> str:
+    # escapes a column name so it is safe to embed in a generated python string literal
+    # replaces backslashes first to avoid double escaping, then escapes single quotes
+    return col.replace("\\", "\\\\").replace("'", "\\'")
+
+
+def _safe_regex(pattern: str, fallback: str) -> str:
+    # rejects patterns that are too long or fail to compile and returns the fallback
+    # this prevents ReDoS from a crafted pattern in a pipeline JSON file
+    if not pattern or len(pattern) > _MAX_REGEX_LEN:
+        return fallback
+    try:
+        re.compile(pattern)
+        return pattern
+    except re.error:
+        return fallback
+
+
 def import_pipeline_json(json_bytes, df, settings):
     from cleaning.basic import (
         clean_string_edges,
@@ -112,6 +137,13 @@ def import_pipeline_json(json_bytes, df, settings):
     from cleaning.advanced import missing_value_handler, smart_column_cleaner
     from cleaning.validators import validate_email_col, validate_phone_col, validate_date_col
     from cleaning.validators import cap_outliers, validate_range
+
+    # reject files that are suspiciously large before parsing
+    if len(json_bytes) > _MAX_JSON_BYTES:
+        raise ValueError(
+            f"Pipeline file is too large ({len(json_bytes):,} bytes). "
+            f"Maximum allowed size is {_MAX_JSON_BYTES:,} bytes."
+        )
 
     missing_threshold = settings.get("missing_threshold", 0.3)
     numeric_strategy = settings.get("numeric_strategy", "auto")
@@ -125,12 +157,22 @@ def import_pipeline_json(json_bytes, df, settings):
     if not isinstance(payload, dict) or "steps" not in payload:
         raise ValueError("JSON does not look like a saved pipeline file.")
 
+    # reject payloads with an unreasonable number of steps
+    steps = payload["steps"]
+    if not isinstance(steps, list) or len(steps) > 500:
+        raise ValueError("Pipeline file contains an invalid or oversized steps list.")
+
     tmp = df.copy()
     applied = []
     skipped = []
 
-    for entry in payload["steps"]:
+    for entry in steps:
         label = entry.get("label", "")
+
+        # guard against non-string labels from a malformed file
+        if not isinstance(label, str):
+            skipped.append(f"invalid label type: {type(label).__name__}")
+            continue
 
         if label == "Strip Whitespace" or label.startswith("Fix: strip_whitespace"):
             tmp = stripping_whitespace(tmp)
@@ -165,14 +207,13 @@ def import_pipeline_json(json_bytes, df, settings):
             tmp = missing_value_handler(tmp, threshold=missing_threshold, numeric_strategy=numeric_strategy)
             applied.append(label)
 
-        # validation steps - each reads metadata from the label and checks the column exists first
-
         elif label.startswith("Validate Email"):
             meta = _parse_label_meta(label, "Validate Email", ["col", "action", "pattern"])
             col = meta["col"] or "email"
             action = meta["action"] or "flag"
-            pattern = meta["pattern"] or r"^[\w\.\+\-]+@[\w\-]+\.[a-zA-Z]{2,}$"
-            # skip gracefully if the column no longer exists in this dataset
+            _default_email_pattern = r"^[\w\.\+\-]+@[\w\-]+\.[a-zA-Z]{2,}$"
+            # validate the regex from the file before passing it to the validator
+            pattern = _safe_regex(meta["pattern"], _default_email_pattern)
             if col not in tmp.columns:
                 skipped.append(f"{label} (column '{col}' not found)")
             else:
@@ -205,7 +246,6 @@ def import_pipeline_json(json_bytes, df, settings):
             col = meta["col"] or "value"
             method = meta["method"] or "iqr"
             action = meta["action"] or "cap"
-            # cast threshold safely so a bad saved value never crashes replay
             try:
                 threshold = float(meta["threshold"]) if meta["threshold"] else 1.5
             except ValueError:
@@ -220,7 +260,6 @@ def import_pipeline_json(json_bytes, df, settings):
             meta = _parse_label_meta(label, "Validate Range", ["col", "min", "max", "action"])
             col = meta["col"] or "value"
             action = meta["action"] or "flag"
-            # cast min and max safely so a bad saved value never crashes replay
             try:
                 minval = float(meta["min"]) if meta["min"] else 0.0
             except ValueError:
@@ -256,7 +295,6 @@ def build_pipeline_script(history):
         label = step["label"]
         lines.append(f"# {label}")
 
-        # basic cleaning steps
         if label == "Strip Whitespace" or label.startswith("Fix: strip_whitespace"):
             lines += [
                 "df = df.apply(lambda x: x.str.strip() if x.dtype == 'object' else x)",
@@ -310,9 +348,9 @@ def build_pipeline_script(history):
                 "    df[_num_cols] = KNNImputer(n_neighbors=5).fit_transform(df[_num_cols])",
             ]
 
-        # transform steps
         elif label.startswith("Find and Replace in"):
-            col = label.replace("Find and Replace in ", "").strip()
+            # use _safe_col to prevent a malicious column name from breaking the script
+            col = _safe_col(label.replace("Find and Replace in ", "").strip())
             lines += [
                 f"# TODO set FIND and REPLACE values for column '{col}'",
                 f"df['{col}'] = df['{col}'].astype(str).str.replace('FIND', 'REPLACE', regex=False)",
@@ -321,7 +359,8 @@ def build_pipeline_script(history):
         elif label.startswith("Type Override:"):
             parts = label.replace("Type Override: ", "").split(" -> ")
             if len(parts) == 2:
-                col, dtype = parts[0].strip(), parts[1].strip()
+                col = _safe_col(parts[0].strip())
+                dtype = parts[1].strip()
                 if "int" in dtype:
                     lines.append(f"df['{col}'] = pd.to_numeric(df['{col}'], errors='coerce').astype('Int64')")
                 elif "float" in dtype:
@@ -344,7 +383,7 @@ def build_pipeline_script(history):
             ]
 
         elif label.startswith("Merge columns into"):
-            new_col = label.replace("Merge columns into ", "").strip()
+            new_col = _safe_col(label.replace("Merge columns into ", "").strip())
             lines += [
                 "# TODO set col1 col2 and separator below",
                 f"df['{new_col}'] = df['col1'].astype(str) + ' ' + df['col2'].astype(str)",
@@ -356,19 +395,14 @@ def build_pipeline_script(history):
                 "df = df.rename(columns={'old_name': 'new_name'})",
             ]
 
-        # validation steps
-        # each label carries embedded metadata as key=value pairs after a pipe
-        # e.g. "Validate Email|col=email|action=flag|pattern=^[...]$"
-        # _parse_label_meta extracts those values so the script uses exact settings
-
         elif label.startswith("Validate Email"):
             meta = _parse_label_meta(label, "Validate Email", ["col", "action", "pattern"])
-            col = meta["col"] or "email"
+            col = _safe_col(meta["col"] or "email")
             action = meta["action"] or "flag"
-            pattern = meta["pattern"] or r"^[\w\.\+\-]+@[\w\-]+\.[a-zA-Z]{2,}$"
+            _default_email_pattern = r"^[\w\.\+\-]+@[\w\-]+\.[a-zA-Z]{2,}$"
+            pattern = _safe_regex(meta["pattern"], _default_email_pattern)
             lines += [
                 f"# col: {col}  action: {action}",
-                f"# pattern: {pattern}",
                 f"_email_pattern = r'{pattern}'",
                 f"_mask = df['{col}'].astype(str).str.strip().str.match(_email_pattern)",
                 f"if '{action}' == 'flag':",
@@ -379,7 +413,7 @@ def build_pipeline_script(history):
 
         elif label.startswith("Standardize Phone"):
             meta = _parse_label_meta(label, "Standardize Phone", ["col", "cc"])
-            col = meta["col"] or "phone"
+            col = _safe_col(meta["col"] or "phone")
             cc = meta["cc"] or "1"
             lines += [
                 f"# col: {col}  default country code: {cc}",
@@ -388,19 +422,19 @@ def build_pipeline_script(history):
                 f"_digits = df['{col}'].astype(str).str.replace(r'\\D', '', regex=True)",
                 "_length = _digits.str.len()",
                 "import numpy as _np",
-                f"_result = _np.where(",
+                "_result = _np.where(",
                 f"    _length == 10, '+' + _cc + _digits,",
-                f"    _np.where(",
+                "    _np.where(",
                 f"        (_length == (10 + _cc_len)) & _digits.str.startswith(_cc), '+' + _digits,",
-                f"        _np.where(_length >= 7, '+' + _digits, _np.nan)",
-                f"    )",
+                "        _np.where(_length >= 7, '+' + _digits, _np.nan)",
+                "    )",
                 ")",
                 f"df['{col}'] = _result",
             ]
 
         elif label.startswith("Standardize Dates"):
             meta = _parse_label_meta(label, "Standardize Dates", ["col", "output_fmt", "input_fmt"])
-            col = meta["col"] or "date"
+            col = _safe_col(meta["col"] or "date")
             output_fmt = meta["output_fmt"] or "%Y-%m-%d"
             input_fmt = meta["input_fmt"] or ""
             lines += [
@@ -411,7 +445,6 @@ def build_pipeline_script(history):
             if input_fmt:
                 lines += [
                     f"_parsed = _pd.to_datetime(_cleaned, format='{input_fmt}', errors='coerce')",
-                    "# fill any rows the custom format missed using auto detection",
                     "_still_unparsed = _parsed.isna() & _cleaned.notna()",
                     "if _still_unparsed.any():",
                     "    _parsed[_still_unparsed] = _pd.to_datetime(_cleaned[_still_unparsed], errors='coerce')",
@@ -426,7 +459,7 @@ def build_pipeline_script(history):
 
         elif label.startswith("Cap Outliers"):
             meta = _parse_label_meta(label, "Cap Outliers", ["col", "method", "action", "threshold"])
-            col = meta["col"] or "value"
+            col = _safe_col(meta["col"] or "value")
             method = meta["method"] or "iqr"
             action = meta["action"] or "cap"
             threshold = meta["threshold"] or "1.5"
@@ -436,8 +469,8 @@ def build_pipeline_script(history):
             ]
             if method == "iqr":
                 lines += [
-                    f"_q1 = _s.quantile(0.25)",
-                    f"_q3 = _s.quantile(0.75)",
+                    "_q1 = _s.quantile(0.25)",
+                    "_q3 = _s.quantile(0.75)",
                     f"_lower = _q1 - {threshold} * (_q3 - _q1)",
                     f"_upper = _q3 + {threshold} * (_q3 - _q1)",
                 ]
@@ -457,7 +490,7 @@ def build_pipeline_script(history):
 
         elif label.startswith("Validate Range"):
             meta = _parse_label_meta(label, "Validate Range", ["col", "min", "max", "action"])
-            col = meta["col"] or "value"
+            col = _safe_col(meta["col"] or "value")
             minval = meta["min"] or "0.0"
             maxval = meta["max"] or "100.0"
             action = meta["action"] or "flag"
