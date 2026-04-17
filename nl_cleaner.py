@@ -10,6 +10,12 @@ from pipeline import commit_history, snapshot
 GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
 GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
+# maximum characters allowed in a user instruction before we reject it
+_MAX_INSTRUCTION_LEN = 2000
+
+# maximum characters allowed in the code block before static check and exec
+_MAX_CODE_LEN = 8000
+
 # blocked names that should never appear in user code
 _BLOCKED_NAMES = {
     "os", "sys", "subprocess", "shutil", "socket", "urllib",
@@ -21,16 +27,47 @@ _BLOCKED_NAMES = {
     "vars", "dir", "globals", "locals", "object", "type",
 }
 
-# safe builtins the code is allowed to call
+# pandas IO method names that must never be called inside the sandbox
+# these can read from or write to the filesystem and network
+_BLOCKED_PD_METHODS = {
+    "read_csv", "read_excel", "read_json", "read_parquet", "read_sql",
+    "read_html", "read_xml", "read_feather", "read_orc", "read_pickle",
+    "read_clipboard", "read_gbq", "read_hdf", "read_stata", "read_sas",
+    "to_csv", "to_excel", "to_json", "to_parquet", "to_sql",
+    "to_html", "to_xml", "to_feather", "to_orc", "to_pickle",
+    "to_clipboard", "to_gbq", "to_hdf", "to_stata",
+}
+
+# safe builtins the sandboxed code is allowed to call
+# print is intentionally excluded to prevent data leaking to server logs
 _SAFE_BUILTINS = {
     "abs": abs, "all": all, "any": any, "bool": bool,
     "dict": dict, "enumerate": enumerate, "filter": filter,
-    "float": float, "int": int, "isinstance": isinstance,
+    "float": float, "int": int,
     "len": len, "list": list, "map": map, "max": max,
-    "min": min, "print": print, "range": range, "round": round,
+    "min": min, "range": range, "round": round,
     "set": set, "sorted": sorted, "str": str, "sum": sum,
     "tuple": tuple, "zip": zip,
 }
+
+# PII-related keywords used to suppress column values from external prompts
+_PII_KEYWORDS = {
+    "email", "mail", "phone", "mobile", "ssn", "passport",
+    "address", "dob", "birth", "salary", "wage", "income",
+    "password", "secret", "token", "credit", "card", "bank",
+    "account", "national", "id", "nid", "cnic",
+}
+
+
+def _is_pii_column(col_name: str) -> bool:
+    # checks if a column name contains any known PII keyword
+    col_lower = col_name.lower() if col_name else ""
+    return any(kw in col_lower for kw in _PII_KEYWORDS)
+
+
+def _safe_sample_value(val: str, max_chars: int = 20) -> str:
+    # truncates a single cell value to avoid sending too much data externally
+    return str(val)[:max_chars]
 
 
 def _static_check(code: str):
@@ -39,6 +76,10 @@ def _static_check(code: str):
     before a single byte is executed.
     Returns (ok: bool, reason: str)
     """
+    # reject oversized code before parsing to prevent DoS via AST
+    if len(code) > _MAX_CODE_LEN:
+        return False, f"Code is too long ({len(code)} chars, max {_MAX_CODE_LEN})"
+
     # block shell-style strings even before parsing
     lowered = code.lower()
     shell_patterns = [
@@ -51,6 +92,11 @@ def _static_check(code: str):
     for pat in shell_patterns:
         if pat in lowered:
             return False, f"Blocked pattern detected: `{pat}`"
+
+    # block pandas IO method names that can read or write files and network
+    for method in _BLOCKED_PD_METHODS:
+        if method in lowered:
+            return False, f"Blocked pandas IO method: `{method}`"
 
     # parse and walk the AST
     try:
@@ -77,6 +123,9 @@ def _static_check(code: str):
                 if isinstance(node.func.value, ast.Name):
                     if node.func.value.id in _BLOCKED_NAMES:
                         return False, f"Call to `{node.func.value.id}.{node.func.attr}` is not allowed"
+                # block pandas IO methods called on any object e.g. pd.read_csv or df.to_csv
+                if node.func.attr in _BLOCKED_PD_METHODS:
+                    return False, f"Pandas IO method `{node.func.attr}` is not allowed"
 
         # block dunder attribute access like df.__class__
         if isinstance(node, ast.Attribute) and node.attr.startswith("__"):
@@ -125,16 +174,27 @@ def _get_api_key():
 
 def _build_prompt(df, instruction):
     col_info = "\n".join(f"  {col} ({df[col].dtype})" for col in df.columns)
-    sample = df.head(5).to_string(index=False)
 
+    # build a safe sample that suppresses PII columns before sending to external API
     dirty_hints = []
     for col in df.columns:
+        if _is_pii_column(col):
+            non_null_count = df[col].dropna().shape[0]
+            dirty_hints.append(f"  {col}: [{non_null_count} non-null values, hidden for privacy]")
+            continue
         non_null = df[col].dropna().astype(str)
         if non_null.empty:
             continue
-        examples = non_null.head(5).tolist()
+        examples = [_safe_sample_value(v) for v in non_null.head(5).tolist()]
         dirty_hints.append(f"  {col}: {examples}")
     dirty_hints_str = "\n".join(dirty_hints)
+
+    # build a sample view that also redacts PII columns
+    safe_head = df.head(5).copy()
+    for col in safe_head.columns:
+        if _is_pii_column(col):
+            safe_head[col] = "[hidden]"
+    sample = safe_head.to_string(index=False)
 
     return f"""You are a careful data analyst and pandas code assistant.
 The user has a dataframe called `df`.
@@ -142,10 +202,10 @@ The user has a dataframe called `df`.
 Column names and types:
 {col_info}
 
-First 5 rows (formatted):
+First 5 rows (formatted, PII columns hidden):
 {sample}
 
-Raw sample values per column (first 5 non-null):
+Raw sample values per column (first 5 non-null, PII columns hidden):
 {dirty_hints_str}
 
 User instruction: {instruction}
@@ -240,19 +300,19 @@ Rules for the code field:
 - Use these safe patterns depending on what the column contains:
 
   CURRENCY / COMMAS (e.g. "$1,200", "2,300", "500"):
-    df['col'] = pd.to_numeric(df['col'].astype(str).str.replace(r'[^\d.\-]', '', regex=True), errors='coerce')
+    df['col'] = pd.to_numeric(df['col'].astype(str).str.replace(r'[^\\d.\\-]', '', regex=True), errors='coerce')
 
   PARENTHESES AS NEGATIVES (e.g. "(1,200)"):
-    df['col'] = pd.to_numeric(df['col'].astype(str).str.replace(r'\((.+?)\)', r'-\1', regex=True).str.replace(r'[^\d.\-]', '', regex=True), errors='coerce')
+    df['col'] = pd.to_numeric(df['col'].astype(str).str.replace(r'\\((.+?)\\)', r'-\\1', regex=True).str.replace(r'[^\\d.\\-]', '', regex=True), errors='coerce')
 
   PERCENTAGE (e.g. "45%", "3.5%"):
-    df['col'] = pd.to_numeric(df['col'].astype(str).str.replace('%', '', regex=False).str.replace(r'[^\d.\-]', '', regex=True), errors='coerce') / 100
+    df['col'] = pd.to_numeric(df['col'].astype(str).str.replace('%', '', regex=False).str.replace(r'[^\\d.\\-]', '', regex=True), errors='coerce') / 100
 
   UNIT SUFFIXES (e.g. "10kg", "5.5km", "200lbs"):
-    df['col'] = pd.to_numeric(df['col'].astype(str).str.extract(r'([-]?\d+\.?\d*)', expand=False), errors='coerce')
+    df['col'] = pd.to_numeric(df['col'].astype(str).str.extract(r'([-]?\\d+\\.?\\d*)', expand=False), errors='coerce')
 
   MIXED TYPES / GENERAL DIRTY NUMERIC:
-    df['col'] = pd.to_numeric(df['col'].astype(str).str.replace(r'[^\d.\-]', '', regex=True), errors='coerce')
+    df['col'] = pd.to_numeric(df['col'].astype(str).str.replace(r'[^\\d.\\-]', '', regex=True), errors='coerce')
 
   DATETIME STRINGS (e.g. "01/02/2023", "March 5 2022"):
     df['col'] = pd.to_datetime(df['col'], errors='coerce')
@@ -365,6 +425,11 @@ def render_nl_cleaner(cdf, file_id="default"):
             st.warning("Type an instruction first.")
             return
 
+        # reject instructions that are too long to prevent prompt injection and excess API cost
+        if len(instruction.strip()) > _MAX_INSTRUCTION_LEN:
+            st.error(f"Instruction is too long ({len(instruction.strip())} chars). Keep it under {_MAX_INSTRUCTION_LEN} characters.")
+            return
+
         with st.spinner("Asking Gemini..."):
             code, explanation, err, is_precondition = _call_gemini(instruction.strip(), cdf)
 
@@ -401,7 +466,15 @@ def render_nl_cleaner(cdf, file_id="default"):
 
     with col_apply:
         if st.button("Apply", key=f"nl_apply_{file_id}", use_container_width=True, type="primary"):
-            # run static check before exec
+            # reject oversized code before static check to prevent DoS via AST parsing
+            if len(edited_code) > _MAX_CODE_LEN:
+                st.session_state["_nl_error"] = (
+                    f"Code is too long ({len(edited_code)} chars, max {_MAX_CODE_LEN}). "
+                    "Please shorten or regenerate."
+                )
+                st.rerun()
+                return
+
             ok, reason = _static_check(edited_code)
             if not ok:
                 st.session_state["_nl_error"] = (
@@ -446,6 +519,3 @@ def render_nl_cleaner(cdf, file_id="default"):
             st.session_state.pop("nl_pending_explanation", None)
             st.session_state.pop("nl_pending_instruction", None)
             st.rerun()
-
-
-    
