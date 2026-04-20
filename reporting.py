@@ -5,6 +5,68 @@ import numpy as np
 import pandas as pd
 
 
+def _escape_reportlab(text: str) -> str:
+    """
+    Escapes characters that ReportLab treats as XML markup inside a Paragraph.
+    Without this, a string like <b>injected</b> from an external API would be
+    parsed as bold markup and could alter the PDF layout in unexpected ways.
+    """
+    return (
+        text
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+
+
+def _delta(before, after):
+    diff = after - before
+    if diff < 0:
+        return f"-{abs(diff):,}"
+    if diff > 0:
+        return f"+{diff:,}"
+    return "0"
+
+
+def _column_profile_table(df, header_color, alt_color, grid_color):
+    from reportlab.lib import colors
+    from reportlab.platypus import Table, TableStyle
+
+    rows = [["Column", "Type", "Non-Null", "Null %", "Unique", "Min", "Max", "Mean"]]
+    for col in df.columns:
+        s = df[col]
+        is_num = pd.api.types.is_numeric_dtype(s)
+        rows.append([
+            col,
+            str(s.dtype),
+            str(int(s.notna().sum())),
+            f"{s.isna().mean() * 100:.1f}%",
+            str(int(s.nunique())),
+            str(round(float(s.min()), 2)) if is_num and s.notna().any() else "-",
+            str(round(float(s.max()), 2)) if is_num and s.notna().any() else "-",
+            str(round(float(s.mean()), 2)) if is_num and s.notna().any() else "-",
+        ])
+    n_cols = len(rows[0])
+    col_w = 25 / n_cols
+    from reportlab.lib.units import cm
+    col_widths = [col_w * cm] * n_cols
+    t = Table(rows, colWidths=col_widths)
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), header_color),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, alt_color]),
+        ("GRID", (0, 0), (-1, -1), 0.3, grid_color),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ]))
+    return t
+
+
 def build_report_pdf(original_df, cleaned_df, history, filename="dataset", ai_summary=""):
     # builds a full before and after cleaning report as a PDF
     # returns the PDF as bytes ready to pass to st.download_button
@@ -108,15 +170,18 @@ def build_report_pdf(original_df, cleaned_df, history, filename="dataset", ai_su
     # title block
     generated_at = datetime.now().strftime("%d %B %Y at %H:%M")
     story.append(Paragraph("Data Cleaning Report", style_title))
-    story.append(Paragraph(f"dataset: {filename}", style_body))
+    story.append(Paragraph(f"dataset: {_escape_reportlab(filename)}", style_body))
     story.append(Paragraph(f"generated: {generated_at}", style_caption))
     story.append(Spacer(1, 0.3 * cm))
     story.append(hr())
 
     # ai executive summary panel only renders if summary was generated
+    # the summary text is escaped before passing to Paragraph to prevent
+    # ReportLab from interpreting XML-like tags returned by the external API
     if ai_summary and ai_summary.strip():
+        safe_summary = _escape_reportlab(ai_summary.strip())
         summary_para = Paragraph(
-            f"<b>AI Summary:</b> {ai_summary.strip()}",
+            f"<b>AI Summary:</b> {safe_summary}",
             style_body,
         )
         summary_table = Table(
@@ -165,7 +230,7 @@ def build_report_pdf(original_df, cleaned_df, history, filename="dataset", ai_su
             df_snap = step["df"]
             step_rows.append([
                 str(i + 1),
-                step["label"],
+                _escape_reportlab(step["label"]),
                 f"{df_snap.shape[0]} rows x {df_snap.shape[1]} cols",
             ])
         story.append(stat_table(step_rows, col_widths=[1.5 * cm, 10 * cm, 4 * cm]))
@@ -228,25 +293,22 @@ def build_report_pdf(original_df, cleaned_df, history, filename="dataset", ai_su
         char_widths.append(max(max_len, 4))
 
     total_chars = sum(char_widths)
-    col_widths = [max(1.5 * cm, (w / total_chars) * available_width) for w in char_widths]
+    col_widths_pdf = [
+        (w / total_chars) * available_width for w in char_widths
+    ]
 
-    total_w = sum(col_widths)
-    if total_w > available_width:
-        scale = available_width / total_w
-        col_widths = [w * scale for w in col_widths]
-
-    sample_table = Table(sample_rows, colWidths=col_widths, repeatRows=1)
+    sample_table = Table(sample_rows, colWidths=col_widths_pdf)
     sample_table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), BLUE),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("FONTSIZE", (0, 0), (-1, -1), 7),
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, LIGHT_GRAY]),
         ("GRID", (0, 0), (-1, -1), 0.3, DIVIDER),
-        ("LEFTPADDING", (0, 0), (-1, -1), 5),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("WORDWRAP", (0, 0), (-1, -1), True),
     ]))
@@ -255,44 +317,3 @@ def build_report_pdf(original_df, cleaned_df, history, filename="dataset", ai_su
     doc.build(story)
     return buf.getvalue()
 
-
-def _delta(before, after):
-    diff = after - before
-    if diff == 0:
-        return "no change"
-    sign = "+" if diff > 0 else ""
-    return f"{sign}{diff}"
-
-
-def _column_profile_table(df, header_color, alt_color, grid_color):
-    from reportlab.lib import colors
-    from reportlab.lib.units import cm
-    from reportlab.platypus import Table, TableStyle
-
-    rows = [["Column", "Type", "Non-Null", "Null", "Null %", "Unique"]]
-    for col in df.columns:
-        s = df[col]
-        rows.append([
-            str(col)[:30],
-            str(s.dtype),
-            str(int(s.notna().sum())),
-            str(int(s.isna().sum())),
-            f"{s.isna().mean() * 100:.1f}%",
-            str(int(s.nunique())),
-        ])
-
-    t = Table(rows, colWidths=[5 * cm, 2.5 * cm, 2 * cm, 1.8 * cm, 1.8 * cm, 2 * cm])
-    t.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), header_color),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 8),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, alt_color]),
-        ("GRID", (0, 0), (-1, -1), 0.3, grid_color),
-        ("LEFTPADDING", (0, 0), (-1, -1), 5),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
-        ("TOPPADDING", (0, 0), (-1, -1), 3),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-    ]))
-    return t

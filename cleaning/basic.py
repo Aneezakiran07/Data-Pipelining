@@ -1,5 +1,32 @@
+import re
+
 import numpy as np
 import pandas as pd
+
+# maxi char length for a user supplied regex pattern in find and replace
+# patterns longer than this are rejected before compilation to prevent ReDoS
+_MAX_FIND_PATTERN_LEN = 300
+
+
+def _safe_find_pattern(pattern: str, use_regex: bool) -> str:
+    """
+    Validates a user supplied find pattern when regex mode is on.
+    Rejects patterns that are too long or fail re.compile to prevent ReDoS.
+    Returns the original pattern if it passes, raises ValueError if it does not.
+    Literal patterns are returned unchanged since pandas escapes them internally.
+    """
+    if not use_regex:
+        return pattern
+    if len(pattern) > _MAX_FIND_PATTERN_LEN:
+        raise ValueError(
+            f"Regex pattern is too long ({len(pattern)} chars, max {_MAX_FIND_PATTERN_LEN}). "
+            "Shorten the pattern or turn off Use Regex."
+        )
+    try:
+        re.compile(pattern)
+    except re.error as exc:
+        raise ValueError(f"Invalid regex pattern: {exc}") from exc
+    return pattern
 
 
 def checking_valid_input(df):
@@ -9,7 +36,8 @@ def checking_valid_input(df):
 
 def drop_duplicate_rows(df):
     checking_valid_input(df)
-    return df.drop_duplicates()
+    # reset_index so downstream positional operations see a clean 0-based index
+    return df.drop_duplicates().reset_index(drop=True)
 
 
 def drop_duplicate_columns(df):
@@ -46,7 +74,13 @@ def find_and_replace(df, col, find, replace, use_regex=False):
     checking_valid_input(df)
     if col not in df.columns:
         raise ValueError(f"Column '{col}' not found")
+    # validate the find pattern before passing it to pandas to prevent ReDoS
+    validated_find = _safe_find_pattern(find, use_regex)
     df_clean = df.copy()
     mask = df_clean[col].notna()
-    df_clean.loc[mask, col] = df_clean.loc[mask, col].astype(str).str.replace(find, replace, regex=use_regex)
+    df_clean.loc[mask, col] = (
+        df_clean.loc[mask, col]
+        .astype(str)
+        .str.replace(validated_find, replace, regex=use_regex)
+    )
     return df_clean
