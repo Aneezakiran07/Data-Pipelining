@@ -277,7 +277,6 @@ def _render_type_override(cdf, all_cols):
             except Exception as e:
                 st.error(str(e))
 
-
 def _render_split_column(cdf, text_cols, all_cols):
     st.write("**Split Column**")
     st.caption("Split one column into several new columns by a delimiter.")
@@ -298,7 +297,21 @@ def _render_split_column(cdf, text_cols, all_cols):
         sp_keep = st.checkbox("Keep original", key="sp_keep")
 
     sp_names = [n.strip() for n in sp_names_raw.split(",") if n.strip()] if sp_names_raw else []
-    sp_ready = bool(sp_col and sp_delim and sp_names)
+
+    # validate the delimiter live so the user sees the problem before clicking Split
+    # catches ReDoS patterns, overlength strings, and invalid regex syntax
+    delimiter_error = None
+    if sp_delim:
+        from cleaning.transforms import _validate_delimiter
+        try:
+            _validate_delimiter(sp_delim)
+        except ValueError as exc:
+            delimiter_error = str(exc)
+
+    if delimiter_error:
+        st.error(f"Delimiter: {delimiter_error}")
+
+    sp_ready = bool(sp_col and sp_delim and sp_names and not delimiter_error)
 
     if st.button("Split", key="sp_run", disabled=not sp_ready,
                  type="primary" if sp_ready else "secondary", use_container_width=True):
@@ -312,7 +325,6 @@ def _render_split_column(cdf, text_cols, all_cols):
             st.rerun()
         except Exception as e:
             st.error(str(e))
-
 
 def _render_merge_columns(cdf, all_cols):
     st.write("**Merge Columns**")
@@ -345,7 +357,6 @@ def _render_merge_columns(cdf, all_cols):
         except Exception as e:
             st.error(str(e))
 
-
 def _render_rename_columns(cdf, all_cols):
     st.write("**Rename Columns**")
     st.caption("Edit any column name directly in the table below, then press Apply.")
@@ -371,12 +382,27 @@ def _render_rename_columns(cdf, all_cols):
     rename_map = dict(zip(edited["Current name"].tolist(), edited["New name"].tolist()))
     changes = {old: new for old, new in rename_map.items() if new.strip() and new.strip() != old}
 
+    # validate every pending new name before enabling Apply
+    # catches null bytes, newlines, pipes, and overlength names before they reach the dataframe
+    from cleaning.transforms import _sanitize_col_name
+    validation_errors = []
+    for old, new in changes.items():
+        try:
+            _sanitize_col_name(new)
+        except ValueError as exc:
+            validation_errors.append(f'"{old}" -> "{new[:30]}": {exc}')
+
     rn1, rn2 = st.columns([3, 1])
     with rn1:
-        st.caption(f"{len(changes)} column(s) will be renamed." if changes else "No changes detected.")
+        if validation_errors:
+            for err in validation_errors:
+                st.error(err)
+        else:
+            st.caption(f"{len(changes)} column(s) will be renamed." if changes else "No changes detected.")
     with rn2:
-        if st.button("Apply", key="rn_apply", disabled=not changes,
-                     type="primary" if changes else "secondary", use_container_width=True):
+        apply_blocked = bool(validation_errors) or not changes
+        if st.button("Apply", key="rn_apply", disabled=apply_blocked,
+                     type="primary" if not apply_blocked else "secondary", use_container_width=True):
             try:
                 _snap = snapshot()
                 with st.spinner(f"Renaming {len(changes)} column(s)..."):
@@ -388,7 +414,6 @@ def _render_rename_columns(cdf, all_cols):
                 st.rerun()
             except Exception as e:
                 st.error(str(e))
-
 
 def _render_type_guesser(cdf, df_key=""):
     st.write("**Data Type Guesser**")
