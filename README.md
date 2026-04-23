@@ -185,7 +185,7 @@ Each operation follows the same pattern. A description is shown with a dropdown 
 
 ## Data Privacy
 
-Everything runs locally. No data is sent externally. The AI features use the Gemini API which receives only column names, data types, and a small sample of row values.
+Everything runs locally. No data is sent externally. The AI feature only receives column names, data types, null rates, duplicate counts, and a small sample of up to 3 truncated values per column, it dont get full rows or PII columns.
 
 ---
 
@@ -203,5 +203,4 @@ Two test files are included in the repo.
 **test_data.csv** covers every error type the app handles including mixed date formats, invalid emails, messy phone numbers, currency strings, percentages, unit values, duration strings, missing values, whitespace, and duplicate rows.
 
 **test_multisheet.xlsx** is an Excel file with three sheets: Employees, Sales, and Products. Each sheet has a different set of messy columns. Use it to test the sheet selector and verify that switching sheets loads the correct data.
-
 
