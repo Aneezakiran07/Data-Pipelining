@@ -55,17 +55,17 @@ def _sanitize_col_name(name: str) -> str:
 def _validate_delimiter(delimiter: str) -> str:
     """
     Validates a user supplied split delimiter before it is passed to str.split.
-    pandas passes the delimiter to Python's re engine when expand=True is used,
-    so an unvalidated delimiter like (a+)+$ causes ReDoS on the full column.
-    Two modes are supported:
-      - literal delimiter: any string up to _MAX_DELIMITER_LEN chars with no
-        regex metacharacters is used as-is via re.escape so it is always treated
-        as a plain string regardless of what characters it contains
-      - regex delimiter: if the string contains a metacharacter it is compiled
-        first to catch catastrophic backtracking patterns via re.compile before
-        any data is touched
+    pandas passes the delimiter to Python's re engine when expand=True is used.
+    re.compile cannot detect catastrophic backtracking patterns like (a+)+$ at
+    compile time so they only blow up at match time, meaning the server hangs
+    silently mid-operation with no error shown to the user.
+    The safe approach is to only allow plain literal delimiters and reject anything
+    that contains regex metacharacters. Split delimiters are always literals in
+    practice: commas, spaces, pipes, dashes, tabs. Nobody needs a regex here.
+    Every accepted delimiter is passed through re.escape before str.split so the
+    re engine always treats it as a fixed string, never as a pattern.
     Raises ValueError with a clear message on any violation.
-    Returns the validated delimiter ready to pass to str.split.
+    Returns the re-escaped delimiter safe to pass to str.split.
     """
     if not delimiter:
         raise ValueError("Delimiter cannot be empty")
@@ -75,20 +75,19 @@ def _validate_delimiter(delimiter: str) -> str:
             f"Delimiter is too long ({len(delimiter)} chars, max {_MAX_DELIMITER_LEN})"
         )
 
-    # regex metacharacters that indicate the user intends a pattern
+    # reject any delimiter that contains regex metacharacters
+    # re.compile cannot detect ReDoS patterns at compile time so the only safe
+    # option is to block regex delimiters entirely and require plain strings
     _REGEX_META = set(r"\.^$*+?{}[]|()")
-    is_regex = any(c in _REGEX_META for c in delimiter)
+    bad = [c for c in delimiter if c in _REGEX_META]
+    if bad:
+        unique_bad = ", ".join(f'"{c}"' for c in sorted(set(bad)))
+        raise ValueError(
+            f"Delimiter contains regex special characters ({unique_bad}). "
+            "Use a plain string like a comma, space, dash, or tab."
+        )
 
-    if is_regex:
-        try:
-            re.compile(delimiter)
-        except re.error as exc:
-            raise ValueError(f"Delimiter is not a valid regex pattern: {exc}") from exc
-        # return as-is so str.split treats it as the intended regex
-        return delimiter
-
-    # plain literal delimiter: escape it so regex metacharacters inside
-    # a literal like "." are never treated as wildcards by the re engine
+    # escape the delimiter so the re engine always treats it as a fixed string
     return re.escape(delimiter)
 
 
