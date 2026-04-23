@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import streamlit as st
 
 from cache import get_analysis_and_recommendations
@@ -64,23 +65,17 @@ def _apply_fix(action_key, sel_cols, cdf, missing_threshold, numeric_strategy):
                     .str.extract(r"([-]?\d[\d\.,]*)", expand=False)
                     .str.replace(",", "", regex=False)
                 )
-                converted = __import__("pandas").to_numeric(cl, errors="coerce")
-                tmp[c] = converted.reindex(tmp.index)
+                tmp[c] = pd.to_numeric(cl, errors="coerce").reindex(tmp.index)
             elif action_key == "convert_percentage":
-                converted = (
-                    __import__("pandas")
-                    .to_numeric(
-                        ne.str.replace("%", "", regex=False).str.replace(r"[^\d.\-]", "", regex=True),
-                        errors="coerce",
-                    )
-                    / 100
+                cleaned = (
+                    ne.str.replace("%", "", regex=False)
+                    .str.replace(r"[^\d.\-]", "", regex=True)
                 )
-                tmp[c] = converted.reindex(tmp.index)
+                tmp[c] = (pd.to_numeric(cleaned, errors="coerce") / 100).reindex(tmp.index)
             elif action_key == "convert_units":
-                converted = __import__("pandas").to_numeric(
+                tmp[c] = pd.to_numeric(
                     ne.str.extract(r"([-]?\d+\.?\d*)", expand=False), errors="coerce"
-                )
-                tmp[c] = converted.reindex(tmp.index)
+                ).reindex(tmp.index)
             elif action_key == "convert_duration":
                 tmp[c] = ne.apply(_convert_duration_val).reindex(tmp.index)
 
@@ -143,7 +138,6 @@ def _render_recommendations(cdf, conversion_threshold, missing_threshold, numeri
         }.get(action_key, [])
 
         if af_cols:
-            # single row: description on the left, popover + fix button on the right
             col_desc, col_pop, col_fix = st.columns([5, 1.4, 1])
             with col_desc:
                 st.write(f"**{title}**")
@@ -158,7 +152,6 @@ def _render_recommendations(cdf, conversion_threshold, missing_threshold, numeri
                     type="primary" if n_sel else "secondary",
                     use_container_width=True,
                 )
-            # button logic outside columns so rerun fires cleanly
             if clicked and n_sel > 0:
                 sel_cols = st.session_state.selected_columns.get(action_key, [])
                 try:
@@ -176,7 +169,6 @@ def _render_recommendations(cdf, conversion_threshold, missing_threshold, numeri
                     st.error(f"Error: {e}")
 
         else:
-            # single row: description on the left, fix button on the right
             col_desc, col_fix = st.columns([6.4, 1])
             with col_desc:
                 st.write(f"**{title}**")
