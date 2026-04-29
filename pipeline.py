@@ -2,12 +2,30 @@ import json
 import re
 import streamlit as st
 
-# wrote security test for pipeline csv, check it out!
 # maximum number of bytes accepted from an uploaded pipeline JSON file
 _MAX_JSON_BYTES = 512_000
 
 # maximum length allowed for a user supplied regex pattern before it is rejected
 _MAX_REGEX_LEN = 300
+
+# allowed values for method and action fields read from pipeline JSON
+# anything outside these sets is replaced with the safe default before reaching
+# the cleaning function, so a crafted JSON cannot send unexpected strings through
+_ALLOWED_OUTLIER_METHODS = {"iqr", "zscore"}
+_ALLOWED_OUTLIER_ACTIONS = {"cap", "remove"}
+_ALLOWED_RANGE_ACTIONS   = {"flag", "remove"}
+_ALLOWED_EMAIL_ACTIONS   = {"flag", "remove"}
+
+# allowed output date formats — the same four shown in the UI dropdown
+# input_fmt is user-supplied so it gets a length cap instead of an allowlist
+_ALLOWED_DATE_OUTPUT_FMTS = {"%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y"}
+
+# maximum character length for a custom date input format string
+_MAX_DATE_FMT_LEN = 40
+
+# outlier threshold bounds matching what the UI slider enforces
+_THRESHOLD_MIN = 0.1
+_THRESHOLD_MAX = 100.0
 
 
 def snapshot():
@@ -127,6 +145,42 @@ def _safe_regex(pattern: str, fallback: str) -> str:
         return fallback
 
 
+def _safe_enum(value: str, allowed: set, default: str) -> str:
+    """
+    Returns value if it is in the allowed set, otherwise returns default.
+    Used to validate method, action, and format fields read from an uploaded
+    pipeline JSON file so unexpected strings never reach cleaning functions.
+    """
+    return value if value in allowed else default
+
+
+def _safe_date_fmt(fmt: str, default: str, allowed: set = None) -> str:
+    """
+    Validates a date format string read from an uploaded pipeline JSON file.
+    If an allowlist is provided the format must be in it.
+    Otherwise it is accepted if it is non-empty and within _MAX_DATE_FMT_LEN chars.
+    Returns default on any violation.
+    """
+    if not fmt or not fmt.strip():
+        return default
+    if allowed is not None:
+        return fmt if fmt in allowed else default
+    return fmt if len(fmt) <= _MAX_DATE_FMT_LEN else default
+
+
+def _safe_threshold(raw: str, default: float = 1.5) -> float:
+    """
+    Parses a threshold value from a pipeline JSON string and clamps it to the
+    range enforced by the UI slider so a crafted value like 1e308 cannot reach
+    the cleaning function and cause a numpy overflow.
+    """
+    try:
+        value = float(raw) if raw else default
+    except (ValueError, TypeError):
+        return default
+    return max(_THRESHOLD_MIN, min(_THRESHOLD_MAX, value))
+
+
 def import_pipeline_json(json_bytes, df, settings):
     from cleaning.basic import (
         clean_string_edges,
@@ -210,9 +264,9 @@ def import_pipeline_json(json_bytes, df, settings):
         elif label.startswith("Validate Email"):
             meta = _parse_label_meta(label, "Validate Email", ["col", "action", "pattern"])
             col = meta["col"] or "email"
-            action = meta["action"] or "flag"
+            # allowlist action so a crafted JSON cannot pass unexpected strings to the validator
+            action = _safe_enum(meta["action"], _ALLOWED_EMAIL_ACTIONS, "flag")
             _default_email_pattern = r"^[\w\.\+\-]+@[\w\-]+\.[a-zA-Z]{2,}$"
-            # validate the regex from the file before passing it to the validator
             pattern = _safe_regex(meta["pattern"], _default_email_pattern)
             if col not in tmp.columns:
                 skipped.append(f"{label} (column '{col}' not found)")
@@ -233,8 +287,10 @@ def import_pipeline_json(json_bytes, df, settings):
         elif label.startswith("Standardize Dates"):
             meta = _parse_label_meta(label, "Standardize Dates", ["col", "output_fmt", "input_fmt"])
             col = meta["col"] or "date"
-            output_fmt = meta["output_fmt"] or "%Y-%m-%d"
-            input_fmt = meta["input_fmt"] or ""
+            # output_fmt must be one of the four formats shown in the UI dropdown
+            # input_fmt is free-form but capped to _MAX_DATE_FMT_LEN chars
+            output_fmt = _safe_date_fmt(meta["output_fmt"], "%Y-%m-%d", allowed=_ALLOWED_DATE_OUTPUT_FMTS)
+            input_fmt = _safe_date_fmt(meta["input_fmt"], "", allowed=None)
             if col not in tmp.columns:
                 skipped.append(f"{label} (column '{col}' not found)")
             else:
@@ -244,12 +300,11 @@ def import_pipeline_json(json_bytes, df, settings):
         elif label.startswith("Cap Outliers"):
             meta = _parse_label_meta(label, "Cap Outliers", ["col", "method", "action", "threshold"])
             col = meta["col"] or "value"
-            method = meta["method"] or "iqr"
-            action = meta["action"] or "cap"
-            try:
-                threshold = float(meta["threshold"]) if meta["threshold"] else 1.5
-            except ValueError:
-                threshold = 1.5
+            # allowlist method and action so crafted values cannot reach cap_outliers
+            method = _safe_enum(meta["method"], _ALLOWED_OUTLIER_METHODS, "iqr")
+            action = _safe_enum(meta["action"], _ALLOWED_OUTLIER_ACTIONS, "cap")
+            # clamp threshold to the same bounds the UI slider enforces
+            threshold = _safe_threshold(meta["threshold"], default=1.5)
             if col not in tmp.columns:
                 skipped.append(f"{label} (column '{col}' not found)")
             else:
@@ -259,7 +314,8 @@ def import_pipeline_json(json_bytes, df, settings):
         elif label.startswith("Validate Range"):
             meta = _parse_label_meta(label, "Validate Range", ["col", "min", "max", "action"])
             col = meta["col"] or "value"
-            action = meta["action"] or "flag"
+            # allowlist action so a crafted JSON cannot pass unexpected strings
+            action = _safe_enum(meta["action"], _ALLOWED_RANGE_ACTIONS, "flag")
             try:
                 minval = float(meta["min"]) if meta["min"] else 0.0
             except ValueError:
@@ -349,7 +405,6 @@ def build_pipeline_script(history):
             ]
 
         elif label.startswith("Find and Replace in"):
-            # use _safe_col to prevent a malicious column name from breaking the script
             col = _safe_col(label.replace("Find and Replace in ", "").strip())
             lines += [
                 f"# TODO set FIND and REPLACE values for column '{col}'",
@@ -398,7 +453,7 @@ def build_pipeline_script(history):
         elif label.startswith("Validate Email"):
             meta = _parse_label_meta(label, "Validate Email", ["col", "action", "pattern"])
             col = _safe_col(meta["col"] or "email")
-            action = meta["action"] or "flag"
+            action = _safe_enum(meta["action"], _ALLOWED_EMAIL_ACTIONS, "flag")
             _default_email_pattern = r"^[\w\.\+\-]+@[\w\-]+\.[a-zA-Z]{2,}$"
             pattern = _safe_regex(meta["pattern"], _default_email_pattern)
             lines += [
@@ -435,11 +490,11 @@ def build_pipeline_script(history):
         elif label.startswith("Standardize Dates"):
             meta = _parse_label_meta(label, "Standardize Dates", ["col", "output_fmt", "input_fmt"])
             col = _safe_col(meta["col"] or "date")
-            output_fmt = meta["output_fmt"] or "%Y-%m-%d"
-            input_fmt = meta["input_fmt"] or ""
+            output_fmt = _safe_date_fmt(meta["output_fmt"], "%Y-%m-%d", allowed=_ALLOWED_DATE_OUTPUT_FMTS)
+            input_fmt = _safe_date_fmt(meta["input_fmt"], "", allowed=None)
             lines += [
                 f"# col: {col}  output format: {output_fmt}",
-                f"_cleaned = df['{col}'].astype(str).str.strip().replace('', _np.nan).replace('nan', _np.nan)",
+                f"_cleaned = df['{col}'].astype(str).str.strip().replace('', np.nan).replace('nan', np.nan)",
                 "import pandas as _pd",
             ]
             if input_fmt:
@@ -460,9 +515,9 @@ def build_pipeline_script(history):
         elif label.startswith("Cap Outliers"):
             meta = _parse_label_meta(label, "Cap Outliers", ["col", "method", "action", "threshold"])
             col = _safe_col(meta["col"] or "value")
-            method = meta["method"] or "iqr"
-            action = meta["action"] or "cap"
-            threshold = meta["threshold"] or "1.5"
+            method = _safe_enum(meta["method"], _ALLOWED_OUTLIER_METHODS, "iqr")
+            action = _safe_enum(meta["action"], _ALLOWED_OUTLIER_ACTIONS, "cap")
+            threshold = _safe_threshold(meta["threshold"], default=1.5)
             lines += [
                 f"# col: {col}  method: {method}  action: {action}  threshold: {threshold}",
                 f"_s = df['{col}'].dropna()",
@@ -480,32 +535,24 @@ def build_pipeline_script(history):
                     f"_upper = _s.mean() + {threshold} * _s.std()",
                 ]
             if action == "cap":
-                lines += [
-                    f"df['{col}'] = df['{col}'].clip(lower=_lower, upper=_upper)",
-                ]
+                lines += [f"df['{col}'] = df['{col}'].clip(lower=_lower, upper=_upper)"]
             else:
-                lines += [
-                    f"df = df[df['{col}'].isna() | df['{col}'].between(_lower, _upper)].reset_index(drop=True)",
-                ]
+                lines += [f"df = df[df['{col}'].isna() | df['{col}'].between(_lower, _upper)].reset_index(drop=True)"]
 
         elif label.startswith("Validate Range"):
             meta = _parse_label_meta(label, "Validate Range", ["col", "min", "max", "action"])
             col = _safe_col(meta["col"] or "value")
             minval = meta["min"] or "0.0"
             maxval = meta["max"] or "100.0"
-            action = meta["action"] or "flag"
+            action = _safe_enum(meta["action"], _ALLOWED_RANGE_ACTIONS, "flag")
             lines += [
                 f"# col: {col}  range: [{minval}, {maxval}]  action: {action}",
                 f"_in_range = df['{col}'].between({minval}, {maxval}, inclusive='both') | df['{col}'].isna()",
             ]
             if action == "flag":
-                lines += [
-                    f"df['{col}_in_range'] = _in_range",
-                ]
+                lines += [f"df['{col}_in_range'] = _in_range"]
             else:
-                lines += [
-                    f"df = df[_in_range].reset_index(drop=True)",
-                ]
+                lines += [f"df = df[_in_range].reset_index(drop=True)"]
 
         else:
             lines.append("# manual step - no code generated")

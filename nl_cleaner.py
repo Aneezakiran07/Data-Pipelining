@@ -1,5 +1,6 @@
 import ast
 import re
+import time
 import traceback
 
 import pandas as pd
@@ -9,6 +10,9 @@ from pipeline import commit_history, snapshot
 
 GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
 GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+
+# minimum seconds a user must wait between consecutive Generate clicks per session
+_RATE_LIMIT_SECONDS = 10
 
 # maximum characters allowed in a user instruction before we reject it
 _MAX_INSTRUCTION_LEN = 2000
@@ -68,6 +72,25 @@ def _is_pii_column(col_name: str) -> bool:
 def _safe_sample_value(val: str, max_chars: int = 20) -> str:
     # truncates a single cell value to avoid sending too much data externally
     return str(val)[:max_chars]
+
+
+def _check_rate_limit() -> tuple[bool, float]:
+    """
+    Returns (allowed, seconds_remaining).
+    Tracks the timestamp of the last Generate call in session state.
+    Calls within _RATE_LIMIT_SECONDS of the previous call are blocked.
+    """
+    last = st.session_state.get("_nl_last_call_ts", 0.0)
+    now = time.monotonic()
+    elapsed = now - last
+    if elapsed < _RATE_LIMIT_SECONDS:
+        return False, round(_RATE_LIMIT_SECONDS - elapsed, 1)
+    return True, 0.0
+
+
+def _record_call():
+    # stamps the current time so the next call can be rate checked against it
+    st.session_state["_nl_last_call_ts"] = time.monotonic()
 
 
 def _static_check(code: str):
@@ -333,7 +356,9 @@ def _call_gemini(instruction, df):
     if not api_key:
         return None, None, "GEMINI_API_KEY not set. Add it to your .env file.", False
 
-    url = GEMINI_API_URL.format(model=GEMINI_MODEL) + f"?key={api_key}"
+    # api key is passed in the x-goog-api-key header, not the url query string
+    # putting secrets in urls exposes them in proxy logs, browser history, and error tracebacks
+    url = GEMINI_API_URL.format(model=GEMINI_MODEL)
     payload = json.dumps({
         "contents": [{"parts": [{"text": _build_prompt(df, instruction)}]}],
         "generationConfig": {
@@ -345,7 +370,10 @@ def _call_gemini(instruction, df):
     req = urllib.request.Request(
         url,
         data=payload,
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "x-goog-api-key": api_key,
+        },
         method="POST",
     )
 
@@ -427,8 +455,22 @@ def render_nl_cleaner(cdf, file_id="default"):
 
         # reject instructions that are too long to prevent prompt injection and excess API cost
         if len(instruction.strip()) > _MAX_INSTRUCTION_LEN:
-            st.error(f"Instruction is too long ({len(instruction.strip())} chars). Keep it under {_MAX_INSTRUCTION_LEN} characters.")
+            st.error(
+                f"Instruction is too long ({len(instruction.strip())} chars). "
+                f"Keep it under {_MAX_INSTRUCTION_LEN} characters."
+            )
             return
+
+        # enforce per-session rate limit so a user cannot hammer the Gemini API
+        allowed, wait = _check_rate_limit()
+        if not allowed:
+            st.warning(
+                f"Please wait {wait}s before generating again. "
+                "This limit keeps API usage under control."
+            )
+            return
+
+        _record_call()
 
         with st.spinner("Asking Gemini..."):
             code, explanation, err, is_precondition = _call_gemini(instruction.strip(), cdf)

@@ -84,3 +84,54 @@ def find_and_replace(df, col, find, replace, use_regex=False):
         .str.replace(validated_find, replace, regex=use_regex)
     )
     return df_clean
+
+
+def find_and_replace_multi(df, col, pairs, use_regex=False):
+    """
+    Applies multiple find and replace pairs to a single column in order.
+    pairs is a list of dicts with find and replace keys.
+    Each find value is validated against the ReDoS guard before use.
+    Pairs with an empty find string are skipped silently so the UI can
+    pass the full table including blank rows without crashing.
+    Returns the modified dataframe and a list of per-pair change counts
+    so the caller can build an informative toast message.
+    """
+    checking_valid_input(df)
+    if col not in df.columns:
+        raise ValueError(f"Column '{col}' not found")
+    if not pairs:
+        raise ValueError("At least one find and replace pair is required")
+
+    df_result = df.copy()
+    counts = []
+
+    mask = df_result[col].notna()
+    # snapshot the column before any pair runs so each pair sees the original values
+    # this prevents pair 2 from matching text that pair 1 just wrote into the column
+    original_series = df_result.loc[mask, col].astype(str).copy()
+    working_series = original_series.copy()
+
+    for pair in pairs:
+        find_val = pair.get("find", "")
+        replace_val = pair.get("replace", "")
+
+        # skip rows where the user left the find field empty
+        if not find_val:
+            counts.append(0)
+            continue
+
+        # validate pattern before it reaches pandas to prevent ReDoS
+        validated_find = _safe_find_pattern(find_val, use_regex)
+
+        # each pair runs against the original snapshot not the accumulating result
+        pair_result = original_series.str.replace(validated_find, replace_val, regex=use_regex)
+
+        # only overwrite cells that this pair actually matched
+        changed_mask = pair_result != original_series
+        working_series[changed_mask] = pair_result[changed_mask]
+
+        n_changed = int(changed_mask.sum())
+        counts.append(n_changed)
+
+    df_result.loc[mask, col] = working_series
+    return df_result, counts

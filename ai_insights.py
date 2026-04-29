@@ -147,11 +147,13 @@ Rules:
 
 def _call_gemini(df):
     # calls the standard non-streaming endpoint and returns parsed json result
+    # the api key is passed in the x-goog-api-key header, not the url query string
+    # putting secrets in urls exposes them in proxy logs, browser history, and error tracebacks
     api_key = _get_api_key()
     if not api_key:
         return None, "GEMINI_API_KEY not set."
 
-    url = GEMINI_API_URL.format(model=GEMINI_MODEL) + f"?key={api_key}"
+    url = GEMINI_API_URL.format(model=GEMINI_MODEL)
     payload = json.dumps({
         "contents": [{"parts": [{"text": _build_prompt(df)}]}],
         "generationConfig": {"temperature": 0.1, "maxOutputTokens": 1024}
@@ -159,7 +161,10 @@ def _call_gemini(df):
 
     req = urllib.request.Request(
         url, data=payload,
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "x-goog-api-key": api_key,
+        },
         method="POST",
     )
 

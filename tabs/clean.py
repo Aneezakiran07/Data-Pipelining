@@ -7,6 +7,7 @@ from cleaning import (
     drop_duplicate_columns,
     drop_duplicate_rows,
     find_and_replace,
+    find_and_replace_multi,
     merge_columns,
     missing_value_handler,
     rename_columns,
@@ -196,35 +197,119 @@ def _render_advanced_cleaning(cdf, missing_threshold, numeric_strategy, conversi
                 st.error(str(e))
 
 
+def _get_fr_pairs():
+    # reads the current pair list from session state and returns it as a list of dicts
+    # initialises with one blank row if nothing exists yet
+    if "fr_pairs" not in st.session_state:
+        st.session_state.fr_pairs = [{"find": "", "replace": ""}]
+    return st.session_state.fr_pairs
+
+
 def _render_find_replace(cdf, all_cols):
     st.write("**Find and Replace**")
+    st.caption("Add multiple pairs and apply them all at once. Pairs are applied in order from top to bottom.")
+
     fr1, fr2 = st.columns([3, 1])
     with fr1:
         fr_col = st.selectbox("Column", all_cols, key="fr_col")
     with fr2:
-        fr_regex = st.checkbox("Use Regex", key="fr_regex",
-                               help="Leave off for simple replacements. Turn on for patterns like removing digits.")
-    fr3, fr4, fr5 = st.columns([2, 2, 1])
-    with fr3:
-        fr_find = st.text_input("Find", key="fr_find", placeholder="e.g. N/A")
-    with fr4:
-        fr_replace = st.text_input("Replace with", key="fr_replace", placeholder="leave blank to delete")
-    with fr5:
-        st.write("")
-        st.write("")
-        if st.button("Run", key="fr_run", disabled=not fr_find,
-                     type="primary" if fr_find else "secondary", use_container_width=True):
+        fr_regex = st.checkbox(
+            "Use Regex", key="fr_regex",
+            help="Applies to all pairs. Leave off for simple text replacements. Turn on for patterns like removing all digits."
+        )
+
+    pairs = _get_fr_pairs()
+
+    # render the table header
+    h1, h2, h3 = st.columns([5, 5, 1])
+    with h1:
+        st.caption("Find")
+    with h2:
+        st.caption("Replace with")
+    with h3:
+        st.caption("")
+
+    # render one row per pair
+    # track which rows the user clicked remove on so we can delete them after the loop
+    rows_to_remove = []
+    for i, pair in enumerate(pairs):
+        c1, c2, c3 = st.columns([5, 5, 1])
+        with c1:
+            new_find = st.text_input(
+                f"find_{i}", value=pair["find"],
+                key=f"fr_find_{i}",
+                placeholder="e.g. N/A",
+                label_visibility="collapsed",
+            )
+        with c2:
+            new_replace = st.text_input(
+                f"replace_{i}", value=pair["replace"],
+                key=f"fr_replace_{i}",
+                placeholder="leave blank to delete",
+                label_visibility="collapsed",
+            )
+        with c3:
+            # only show remove button when there is more than one row
+            # keeps at least one blank row always visible so the table never disappears
+            if len(pairs) > 1:
+                if st.button("✕", key=f"fr_remove_{i}", use_container_width=True):
+                    rows_to_remove.append(i)
+            else:
+                st.write("")
+
+        # sync edits back into session state immediately so values survive reruns
+        st.session_state.fr_pairs[i]["find"] = new_find
+        st.session_state.fr_pairs[i]["replace"] = new_replace
+
+    # apply removals after the loop to avoid mutating the list mid-iteration
+    if rows_to_remove:
+        st.session_state.fr_pairs = [
+            p for idx, p in enumerate(st.session_state.fr_pairs)
+            if idx not in rows_to_remove
+        ]
+        st.rerun()
+
+    # add row and run buttons sit below the table
+    btn1, btn2 = st.columns([1, 1])
+    with btn1:
+        if st.button("+ Add row", key="fr_add_row", use_container_width=True):
+            st.session_state.fr_pairs.append({"find": "", "replace": ""})
+            st.rerun()
+
+    # a run is valid as long as at least one pair has a non-empty find value
+    has_valid_pair = any(p["find"].strip() for p in st.session_state.fr_pairs)
+
+    with btn2:
+        if st.button(
+            "Run all", key="fr_run",
+            disabled=not has_valid_pair,
+            type="primary" if has_valid_pair else "secondary",
+            use_container_width=True,
+        ):
             try:
                 _snap = snapshot()
-                before_vals = cdf[fr_col].copy()
-                with st.spinner(f"Searching {len(cdf):,} rows in '{fr_col}'..."):
-                    result = find_and_replace(cdf, fr_col, fr_find, fr_replace, fr_regex)
-                n_changed = int(
-                    (before_vals.fillna("").astype(str) != result[fr_col].fillna("").astype(str)).sum()
-                )
+                active_pairs = [p for p in st.session_state.fr_pairs if p["find"].strip()]
+                with st.spinner(f"Searching {len(cdf):,} rows in '{fr_col}' with {len(active_pairs)} pair(s)..."):
+                    result, counts = find_and_replace_multi(
+                        cdf, fr_col, active_pairs, use_regex=fr_regex
+                    )
+                total_changed = sum(counts)
                 st.session_state.current_df = result
-                commit_history(f"Find and Replace in {fr_col}", _snap)
-                msg = f"Replaced {n_changed:,} value(s) in '{fr_col}'." if n_changed else f"No matches found in '{fr_col}'."
+                commit_history(f"Find and Replace (multi) in {fr_col}", _snap)
+
+                # reset the table to one blank row after a successful run
+                st.session_state.fr_pairs = [{"find": "", "replace": ""}]
+
+                if total_changed > 0:
+                    pair_detail = ", ".join(
+                        f'"{p["find"]}" x{c}'
+                        for p, c in zip(active_pairs, counts)
+                        if c > 0
+                    )
+                    msg = f"Replaced {total_changed:,} value(s) in '{fr_col}'. ({pair_detail})"
+                else:
+                    msg = f"No matches found in '{fr_col}' for any of the {len(active_pairs)} pair(s)."
+
                 st.session_state["_toast"] = (msg, "✔")
                 st.rerun()
             except Exception as e:
@@ -298,8 +383,6 @@ def _render_split_column(cdf, text_cols, all_cols):
 
     sp_names = [n.strip() for n in sp_names_raw.split(",") if n.strip()] if sp_names_raw else []
 
-    # validate the delimiter live so the user sees the problem before clicking Split
-    # catches ReDoS patterns, overlength strings, and invalid regex syntax
     delimiter_error = None
     if sp_delim:
         from cleaning.transforms import _validate_delimiter
@@ -382,8 +465,6 @@ def _render_rename_columns(cdf, all_cols):
     rename_map = dict(zip(edited["Current name"].tolist(), edited["New name"].tolist()))
     changes = {old: new for old, new in rename_map.items() if new.strip() and new.strip() != old}
 
-    # validate every pending new name before enabling Apply
-    # catches null bytes, newlines, pipes, and overlength names before they reach the dataframe
     from cleaning.transforms import _sanitize_col_name
     validation_errors = []
     for old, new in changes.items():
@@ -422,7 +503,6 @@ def _render_type_guesser(cdf, df_key=""):
         "Select the suggestions you want to apply then press Apply Selected."
     )
 
-    # per column progress bar
     if st.session_state.get(f"_tg_loading_{df_key}"):
         cols = list(cdf.columns)
         bar = st.progress(0, text=f"Scanning {len(cdf):,} rows — checking column 1 of {len(cols)}...")
