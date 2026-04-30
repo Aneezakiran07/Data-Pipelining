@@ -117,7 +117,7 @@ A full PDF report can be generated after cleaning. It includes:
 - Extract numeric values from unit strings
 - Convert duration strings to seconds
 - Handle missing values using KNN or MICE
-- Find and replace with optional regex
+- Find and replace working with multi row with optional regex
 - Force a column to a specific type
 - Split one column into multiple columns by a delimiter
 - Merge multiple columns into one

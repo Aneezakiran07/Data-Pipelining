@@ -205,9 +205,27 @@ def _get_fr_pairs():
     return st.session_state.fr_pairs
 
 
+def _preview_match_count(series, find_val, use_regex):
+    """
+    Counts how many non-null cells in series contain at least one match for find_val.
+    Returns an int on success, or None if the pattern is invalid so the caller can
+    show a warning instead of a count.
+    Does not modify the series.
+    """
+    if not find_val:
+        return None
+    try:
+        mask = series.notna()
+        hits = series[mask].astype(str).str.contains(find_val, regex=use_regex, na=False)
+        return int(hits.sum())
+    except Exception:
+        # invalid regex mid-typing, return None so the UI shows a warning not a crash
+        return None
+
+
 def _render_find_replace(cdf, all_cols):
     st.write("**Find and Replace**")
-    st.caption("Add multiple pairs and apply them all at once. Pairs are applied in order from top to bottom.")
+    st.caption("Add multiple pairs and apply them all at once. Each pair runs against the original values so pairs cannot interfere with each other.")
 
     fr1, fr2 = st.columns([3, 1])
     with fr1:
@@ -220,20 +238,25 @@ def _render_find_replace(cdf, all_cols):
 
     pairs = _get_fr_pairs()
 
+    # precompute the column series once so preview counts are cheap per row
+    col_series = cdf[fr_col] if fr_col in cdf.columns else pd.Series(dtype="object")
+
     # render the table header
-    h1, h2, h3 = st.columns([5, 5, 1])
+    h1, h2, h3, h4 = st.columns([5, 5, 2, 1])
     with h1:
         st.caption("Find")
     with h2:
         st.caption("Replace with")
     with h3:
+        st.caption("Matches")
+    with h4:
         st.caption("")
 
-    # render one row per pair
+    # render one row per pair including a live match count in the preview column
     # track which rows the user clicked remove on so we can delete them after the loop
     rows_to_remove = []
     for i, pair in enumerate(pairs):
-        c1, c2, c3 = st.columns([5, 5, 1])
+        c1, c2, c3, c4 = st.columns([5, 5, 2, 1])
         with c1:
             new_find = st.text_input(
                 f"find_{i}", value=pair["find"],
@@ -249,6 +272,19 @@ def _render_find_replace(cdf, all_cols):
                 label_visibility="collapsed",
             )
         with c3:
+            # show live match count so the user knows how many cells will be affected
+            # before pressing run, uses the current find value after syncing
+            if new_find.strip():
+                count = _preview_match_count(col_series, new_find.strip(), fr_regex)
+                if count is None:
+                    st.caption(":orange[bad pattern]")
+                elif count == 0:
+                    st.caption(":grey[0 matches]")
+                else:
+                    st.caption(f":green[{count:,} match{'es' if count != 1 else ''}]")
+            else:
+                st.caption("")
+        with c4:
             # only show remove button when there is more than one row
             # keeps at least one blank row always visible so the table never disappears
             if len(pairs) > 1:
@@ -289,7 +325,7 @@ def _render_find_replace(cdf, all_cols):
             try:
                 _snap = snapshot()
                 active_pairs = [p for p in st.session_state.fr_pairs if p["find"].strip()]
-                with st.spinner(f"Searching {len(cdf):,} rows in '{fr_col}' with {len(active_pairs)} pair(s)..."):
+                with st.spinner(f"Applying {len(active_pairs)} pair(s) across {len(cdf):,} rows in '{fr_col}'..."):
                     result, counts = find_and_replace_multi(
                         cdf, fr_col, active_pairs, use_regex=fr_regex
                     )
@@ -301,12 +337,16 @@ def _render_find_replace(cdf, all_cols):
                 st.session_state.fr_pairs = [{"find": "", "replace": ""}]
 
                 if total_changed > 0:
-                    pair_detail = ", ".join(
-                        f'"{p["find"]}" x{c}'
-                        for p, c in zip(active_pairs, counts)
-                        if c > 0
-                    )
-                    msg = f"Replaced {total_changed:,} value(s) in '{fr_col}'. ({pair_detail})"
+                    # build one entry per pair that actually changed something
+                    # format: "alice" -> "bobby" (3 cells)
+                    replace_label = '(deleted)' if '' == '' else None
+                    pair_parts = []
+                    for p, c in zip(active_pairs, counts):
+                        if c > 0:
+                            target = f'"{p["replace"]}"' if p["replace"] else "(deleted)"
+                            pair_parts.append(f'"{p["find"]}" \u2192 {target} ({c:,} cell{"s" if c != 1 else ""})')
+                    pair_detail = " | ".join(pair_parts)
+                    msg = f"{total_changed:,} change(s) in '{fr_col}': {pair_detail}"
                 else:
                     msg = f"No matches found in '{fr_col}' for any of the {len(active_pairs)} pair(s)."
 
