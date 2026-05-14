@@ -7,6 +7,8 @@ A Streamlit app that takes messy data files and cleans them automatically or man
 ## Demo
 
 https://data-pipelining-qnddvbut7ayklccgo5cp8v.streamlit.app/
+## Video demo link
+https://drive.google.com/file/d/1oI9FJehpTdsFCoxygUPd3RHjXB5-FK1O/view?usp=sharing
 
 ---
 
